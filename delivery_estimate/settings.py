@@ -36,25 +36,30 @@ SECRET_KEY = os.environ.get(
 DEBUG = _env_bool("DJANGO_DEBUG", default=True)
 ALLOWED_HOSTS = _env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,0.0.0.0")
 
-# Trust the X-Forwarded-Proto header from a reverse proxy (nginx, Caddy).
-# Required so Django knows the request is HTTPS even though gunicorn
-# receives it as HTTP on the local socket. Safe as long as your proxy
-# strips client-supplied X-Forwarded-* headers (nginx default behavior).
-SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+# Whether this deployment is served over HTTPS. Drives HSTS, secure cookies,
+# SSL redirect, and the proxy SSL header. Defaults to enabled when DEBUG=False.
+# Set DJANGO_USE_HTTPS=false for IP-only or staging deployments without TLS,
+# otherwise Django sends HSTS and the browser refuses HTTP on subsequent visits.
+USE_HTTPS = _env_bool("DJANGO_USE_HTTPS", default=not DEBUG)
 
-# Production hardening when DEBUG is off.
-if not DEBUG:
+if USE_HTTPS:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SECURE_SSL_REDIRECT = _env_bool("DJANGO_SSL_REDIRECT", default=True)
     SECURE_HSTS_SECONDS = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
-    SECURE_SSL_REDIRECT = _env_bool("DJANGO_SSL_REDIRECT", default=True)
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
+
+# Clickjacking protection is HTTP-safe; always on outside dev.
+if not DEBUG:
     X_FRAME_OPTIONS = "DENY"
 
-# CSRF: trust hosts behind HTTPS for cross-origin POST (the inventory toggles)
+# CSRF: trust the configured hosts using whichever scheme this deployment uses.
+_csrf_scheme = "https" if USE_HTTPS else "http"
 CSRF_TRUSTED_ORIGINS = [
-    f"https://{host}" for host in ALLOWED_HOSTS if host not in ("localhost", "127.0.0.1", "0.0.0.0")
+    f"{_csrf_scheme}://{host}" for host in ALLOWED_HOSTS
+    if host not in ("localhost", "127.0.0.1", "0.0.0.0")
 ]
 
 
