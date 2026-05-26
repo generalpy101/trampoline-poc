@@ -8,14 +8,9 @@
     <div>
       <h1>When will it arrive?</h1>
       <p class="hero-sub">
-        Live inventory and historical lane performance, joined at request time.
-        Toggle stock to zero to watch the system shift tiers in real time.
+        Pick a product, enter your pincode, get the real delivery date for your
+        order. Try the stock controls below to see how the estimate changes.
       </p>
-    </div>
-    <div class="hero-aside">
-      <div><strong>{{ products|length }}</strong> products indexed</div>
-      <div>5 pincode clusters</div>
-      <div>3 warehouses</div>
     </div>
   </section>
 
@@ -28,9 +23,9 @@
         <label>
           <span class="label">Product</span>
           <select x-model="sku" @change="loadInventory()">
-            <option value="">Select a product…</option>
+            <option value="">Choose a product…</option>
             {% for p in products %}
-            <option value="{{ p.sku }}">{{ p.name }} · {{ p.sku }}</option>
+            <option value="{{ p.sku }}">{{ p.name }}</option>
             {% endfor %}
           </select>
         </label>
@@ -40,15 +35,15 @@
           <input type="text" x-model="pincode" placeholder="e.g. 110001" maxlength="6"
                  @keyup.enter="getEstimate()" />
           <span class="hint">
-            Mapped: <code>110001</code> Delhi · <code>400001</code> Mumbai · <code>560001</code> Bangalore<br/>
-            Unmapped (prefix-match demo): <code>110099</code> · <code>120001</code> · <code>880001</code>
+            Serving North, West, South, and East metros.
+            Try <code>110001</code> · <code>400001</code> · <code>560001</code>.
           </span>
         </label>
 
         <button class="primary" @click="getEstimate()"
                 :disabled="!sku || !pincode || loading">
-          <span x-show="!loading">Get delivery estimate →</span>
-          <span x-show="loading">Computing…</span>
+          <span x-show="!loading">Check delivery date →</span>
+          <span x-show="loading">Checking…</span>
         </button>
       </div>
     </section>
@@ -65,7 +60,7 @@
             <circle cx="15" cy="17" r="1.2" fill="currentColor"/>
           </svg>
         </div>
-        <p class="empty-text">Pick a product and enter a pincode to begin.</p>
+        <p class="empty-text">Your delivery date will appear here.</p>
       </section>
 
       <!-- Loading skeleton -->
@@ -76,28 +71,21 @@
         <div class="skeleton-row" style="width: 80%"></div>
       </section>
 
-      <!-- Result: not serviceable -->
+      <!-- Not serviceable -->
       <section x-show="result && !result.serviceable && !loading" x-cloak
                class="card result-card tier-not_serviceable">
-        <div class="result-band">
-          <span>Not yet serviceable</span>
-          <span x-text="result?.tier"></span>
-        </div>
+        <div class="result-band"><span>Not yet available</span></div>
         <div class="result-body">
           <div class="not-serviceable-icon">!</div>
           <p class="result-reason" x-text="result?.reason"></p>
-          <div class="result-meta">
-            <span x-show="result?.served_from_cache" class="cache-tag">cached</span>
-          </div>
         </div>
       </section>
 
-      <!-- Result: normal estimate -->
+      <!-- Normal estimate -->
       <section x-show="result && result.serviceable && !loading" x-cloak
                class="card result-card" :class="resultClass()">
         <div class="result-band">
-          <span>Delivery estimate</span>
-          <span x-text="result?.tier"></span>
+          <span x-text="result?.tier_label || 'Delivery estimate'"></span>
         </div>
         <div class="result-body">
           <!-- Date -->
@@ -125,7 +113,7 @@
               <div class="gauge-seg" :class="confSegClass(1)"></div>
               <div class="gauge-seg" :class="confSegClass(2)"></div>
             </div>
-            <div class="gauge-label" x-text="(result?.confidence || '') + ' confidence'"></div>
+            <div class="gauge-label" x-text="confidenceLabel()"></div>
           </div>
 
           <!-- Calculation breakdown -->
@@ -158,14 +146,8 @@
 
           <!-- Comparison vs old fixed promise -->
           <div class="comparison">
-            <span class="old">10–14 days fixed</span>
+            <span class="old">10–14 days for everyone</span>
             <span class="new" x-text="comparisonText()"></span>
-          </div>
-
-          <!-- Meta footer -->
-          <div class="result-meta">
-            <span x-show="result?.warehouse_code">Warehouse: <code x-text="result?.warehouse_code"></code></span>
-            <span x-show="result?.served_from_cache" class="cache-tag">cached</span>
           </div>
         </div>
       </section>
@@ -176,17 +158,16 @@
   <!-- Inventory table — always below, full-width -->
   <section x-show="sku" x-cloak class="card inventory-card">
     <div class="card-head">
-      <h2>Live inventory for <code x-text="sku"></code></h2>
-      <span class="small">Click "zero" to simulate a stock-out → estimate switches tiers</span>
+      <h2>Stock availability</h2>
+      <span class="small">Set a warehouse to zero to see how the estimate adjusts.</span>
     </div>
 
     <table class="data-table">
       <thead>
         <tr>
           <th>Warehouse</th>
-          <th>Code</th>
           <th>Region</th>
-          <th class="num">Stock</th>
+          <th class="num">In stock</th>
           <th class="num">Action</th>
         </tr>
       </thead>
@@ -194,16 +175,14 @@
         <template x-for="item in inventory" :key="item.warehouse_code">
           <tr>
             <td><strong x-text="item.warehouse_name"></strong></td>
-            <td><code x-text="item.warehouse_code"></code></td>
             <td><span class="region-pill" x-text="item.warehouse_region"></span></td>
             <td class="num" :class="item.quantity === 0 ? 'oos' : ''">
-              <span x-text="item.quantity"></span>
-              <span class="dim" x-text="item.quantity === 0 ? '' : ' units'"></span>
+              <span x-text="item.quantity === 0 ? 'out of stock' : item.quantity + ' units'"></span>
             </td>
             <td class="num">
               <button class="ghost"
                       @click="zeroStock(item.warehouse_code)"
-                      x-show="item.quantity > 0">zero</button>
+                      x-show="item.quantity > 0">set to 0</button>
               <span x-show="item.quantity === 0" class="dim">—</span>
             </td>
           </tr>
@@ -212,7 +191,7 @@
     </table>
 
     <div class="inventory-actions">
-      <p class="small">Tip: zero out a nearby warehouse then re-estimate to see the tier switch.</p>
+      <p class="small">Toggle a stock value and re-check to see the date change.</p>
       <button class="secondary" @click="restoreStock()">Restore all stock</button>
     </div>
   </section>
@@ -278,6 +257,14 @@ function estimator() {
       return '';
     },
 
+    confidenceLabel() {
+      const c = this.result?.confidence;
+      if (c === 'high')   return 'Confident';
+      if (c === 'medium') return 'Likely';
+      if (c === 'low')    return 'Best guess';
+      return '';
+    },
+
     formatDate(iso) {
       if (!iso) return '';
       const d = new Date(iso + 'T00:00:00');
@@ -291,9 +278,9 @@ function estimator() {
       const d = this.result.total_days_from_today;
       if (this.result.is_range) {
         const latest = Math.ceil((new Date(this.result.latest_date) - new Date()) / 86400000);
-        return `Now ${d}–${latest} days, specific to you`;
+        return `Now ${d}–${latest} days, just for you`;
       }
-      return `Now ${d} days, specific to you`;
+      return `Now ${d} days, just for you`;
     },
   };
 }

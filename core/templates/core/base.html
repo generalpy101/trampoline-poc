@@ -26,12 +26,10 @@
         <path d="M16 11h3"/>
       </svg>
       Delivery&nbsp;Estimate
-      <span class="brand-meta">v0.1 · live</span>
     </a>
     <nav class="brand-nav">
       <a href="/" class="{% if request.path == '/' %}active{% endif %}">Estimator</a>
       <a href="/dashboard/" class="{% if '/dashboard/' in request.path %}active{% endif %}">Dashboard</a>
-      <a href="/admin/">Admin</a>
     </nav>
   </div>
 </header>
@@ -41,7 +39,7 @@
 </main>
 
 <footer class="site-footer">
-  POC · Django + Alpine.js · <strong>Solution 1</strong> on-demand cache + <strong>Solution 4</strong> statistical P{{ percentile_pct|default:"80" }}
+  Personalized delivery dates for every order.
 </footer>
 
 </body>

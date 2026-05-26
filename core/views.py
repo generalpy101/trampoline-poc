@@ -26,7 +26,7 @@ from core.models import (
     Prediction,
     Product,
 )
-from core.services.estimator import compute_estimate, resolve_cluster
+from core.services.estimator import compute_estimate, resolve_cluster, tier_label
 from core.services.reasoning import humanize_reason
 
 
@@ -55,17 +55,27 @@ def dashboard(request: HttpRequest):
         .order_by("-total")
     )
 
-    # Decorate with bar widths and per-tier on-time rate for the chart
-    by_tier = []
+    # Decorate with bar widths, friendly labels, and on-time rate for the chart.
+    # Merge tiers that map to the same user-facing label so the dashboard
+    # doesn't show "Restock arriving soon" twice.
+    bucketed = {}
     max_total = max((r["total"] for r in by_tier_qs), default=1) or 1
     for r in by_tier_qs:
-        on_time_pct = (r["on_time"] / r["resolved"] * 100) if r["resolved"] else None
+        label = tier_label(r["tier_used"])
+        b = bucketed.setdefault(label, {"label": label, "total": 0, "resolved": 0, "on_time": 0})
+        b["total"] += r["total"]
+        b["resolved"] += r["resolved"]
+        b["on_time"] += r["on_time"]
+
+    by_tier = []
+    for b in sorted(bucketed.values(), key=lambda x: -x["total"]):
+        on_time_pct = (b["on_time"] / b["resolved"] * 100) if b["resolved"] else None
         bar_class = "good" if on_time_pct and on_time_pct >= 75 else (
             "warn" if on_time_pct and on_time_pct >= 50 else "bad"
         )
         by_tier.append({
-            **r,
-            "bar_pct": int(r["total"] / max_total * 100),
+            **b,
+            "bar_pct": int(b["total"] / max_total * 100),
             "on_time_pct": on_time_pct,
             "bar_class": bar_class,
         })
@@ -74,13 +84,18 @@ def dashboard(request: HttpRequest):
     # In a real system, this comes from a time-series query on Prediction.
     spark = _build_accuracy_sparkline(resolved)
 
+    # Annotate recent predictions with the friendly tier label.
+    recent_list = list(qs.order_by("-predicted_at")[:15])
+    for p in recent_list:
+        p.tier_label = tier_label(p.tier_used)
+
     return render(request, "core/dashboard.html", {
         "total": qs.count(),
         "resolved_count": resolved.count(),
         "accuracy_pct": accuracy,
         "avg_miss_days": avg_miss,
         "by_tier": by_tier,
-        "recent": qs.order_by("-predicted_at")[:15],
+        "recent": recent_list,
         "percentile": settings.DELIVERY_PROMISE_PERCENTILE,
         "percentile_pct": int(settings.DELIVERY_PROMISE_PERCENTILE * 100),
         "spark_points": spark["points"],

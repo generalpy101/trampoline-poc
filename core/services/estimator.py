@@ -79,6 +79,7 @@ class Estimate:
         d = asdict(self)
         d["earliest_date"] = self.earliest_date.isoformat()
         d["latest_date"] = self.latest_date.isoformat()
+        d["tier_label"] = TIER_LABELS.get(self.tier, "")
         return d
 
 
@@ -92,6 +93,22 @@ class Tier:
     AWAITING_BATCH_NO_SLIP = "awaiting_batch_no_slip"
     SOFT_FALLBACK = "soft_fallback"
     NOT_SERVICEABLE = "not_serviceable"
+
+
+# Customer-facing labels. Used by the UI so we never expose enum names.
+TIER_LABELS = {
+    Tier.IN_STOCK_NEAREST:       "In stock nearby",
+    Tier.IN_STOCK_FARTHER:       "Available — ships from another warehouse",
+    Tier.IN_STOCK_NO_STATS:      "In stock",
+    Tier.AWAITING_BATCH:         "Restock arriving soon",
+    Tier.AWAITING_BATCH_NO_SLIP: "Restock arriving soon",
+    Tier.SOFT_FALLBACK:          "Currently restocking",
+    Tier.NOT_SERVICEABLE:        "Not yet available in your area",
+}
+
+
+def tier_label(tier: str) -> str:
+    return TIER_LABELS.get(tier, tier)
 
 
 # Pincode match quality, surfaced through confidence and reason text.
