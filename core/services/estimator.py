@@ -151,18 +151,18 @@ def _estimate_in_stock(today, handling, stocked, cluster, match_quality) -> Esti
     Pick the warehouse with the fastest known lane to this cluster.
     If a warehouse has no lane stats yet, fall back to platform default transit.
     """
-    best_warehouse = None
-    best_days = None
-    has_stats_for_best = False
-    best_sample_size = 0
-
+    # Score each stocked warehouse. Fastest transit wins; same-region breaks
+    # ties (defensive: when lane stats are missing and every warehouse falls
+    # back to the platform default, we still want to ship from "next door"
+    # rather than across the country).
+    candidates = []
     for inv in stocked:
         days, has_stats, samples = _lane_transit_days(inv.warehouse, cluster)
-        if best_days is None or days < best_days:
-            best_warehouse = inv.warehouse
-            best_days = days
-            has_stats_for_best = has_stats
-            best_sample_size = samples
+        same_region_penalty = 0 if inv.warehouse.region == cluster.region else 1
+        candidates.append((days, same_region_penalty, inv.warehouse, has_stats, samples))
+    candidates.sort(key=lambda c: (c[0], c[1]))
+
+    best_days, _, best_warehouse, has_stats_for_best, best_sample_size = candidates[0]
 
     transit_days = int(round(best_days))
     total_days = handling + transit_days
