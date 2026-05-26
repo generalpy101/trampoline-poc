@@ -1,0 +1,156 @@
+{% extends "core/base.html" %}
+{% block title %}Dashboard · Delivery Estimate{% endblock %}
+
+{% block content %}
+<div class="container">
+
+  <section class="hero dashboard-hero">
+    <div>
+      <h1>Accuracy</h1>
+      <p class="hero-sub">
+        Predictions vs reality. Promising at the <strong>P{{ percentile_pct }}</strong> of past
+        transit times — we expect roughly that fraction of orders to arrive by the promised date.
+      </p>
+    </div>
+    <div class="hero-aside">
+      <div><strong>{{ total }}</strong> predictions</div>
+      <div>{{ resolved_count }} resolved</div>
+      <div>last 14 days</div>
+    </div>
+  </section>
+
+  <!-- Top-line stats strip -->
+  <section class="stats-strip">
+    <div class="stat">
+      <div class="stat-label">Total predictions</div>
+      <div class="stat-value tabular">{{ total }}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Resolved</div>
+      <div class="stat-value tabular">{{ resolved_count }}</div>
+      <div class="stat-sub">have a real delivery date</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">On-time</div>
+      <div class="stat-value tabular">
+        {% if accuracy_pct is not None %}{{ accuracy_pct|floatformat:1 }}<span class="unit">%</span>{% else %}—{% endif %}
+      </div>
+      <div class="stat-sub">vs P{{ percentile_pct }} target</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Avg miss</div>
+      <div class="stat-value tabular">
+        {% if avg_miss_days is not None %}{{ avg_miss_days|floatformat:1 }}<span class="unit">d</span>{% else %}—{% endif %}
+      </div>
+      <div class="stat-sub">negative = early</div>
+    </div>
+  </section>
+
+  <!-- Sparkline chart -->
+  <section class="card chart-card">
+    <div class="card-head">
+      <h2>On-time rate, last 14 days</h2>
+      <span class="small">Dashed line: P{{ percentile_pct }} target</span>
+    </div>
+    <svg viewBox="0 0 800 110" class="chart-svg" preserveAspectRatio="none">
+      <!-- target goal line -->
+      <line x1="0" x2="800" y1="{{ spark_goal_y }}" y2="{{ spark_goal_y }}"
+            stroke="#a8451a" stroke-width="1" stroke-dasharray="3 3" opacity="0.5"/>
+      <text x="794" y="{{ spark_goal_y }}" text-anchor="end" dy="-3"
+            font-family="JetBrains Mono, monospace" font-size="9" fill="#a8451a"
+            opacity="0.8">P{{ percentile_pct }} goal</text>
+
+      <!-- area fill under the line -->
+      <path d="{{ spark_area }}" fill="#1a1814" opacity="0.05"/>
+      <!-- the line itself -->
+      <path d="{{ spark_path }}" fill="none" stroke="#1a1814" stroke-width="1.5"
+            stroke-linejoin="round" stroke-linecap="round"/>
+
+      <!-- points -->
+      {% for p in spark_points %}
+        <circle cx="{{ p.x|floatformat:1 }}" cy="{{ p.y|floatformat:1 }}" r="2.5" fill="#1a1814"/>
+      {% endfor %}
+    </svg>
+  </section>
+
+  <!-- Tier distribution as horizontal bars -->
+  <section class="card">
+    <div class="card-head">
+      <h2>Tier breakdown</h2>
+      <span class="small">Bar width = volume · color = on-time rate</span>
+    </div>
+
+    <div class="tier-bars">
+      {% for row in by_tier %}
+        <div class="tier-row">
+          <div><code>{{ row.tier_used }}</code></div>
+          <div class="tier-bar-track">
+            <div class="tier-bar-fill {{ row.bar_class }}" style="width: {{ row.bar_pct }}%;">
+              <span class="tier-bar-meta">{{ row.total }} prediction{{ row.total|pluralize }}</span>
+            </div>
+          </div>
+          <div class="tier-rate">
+            {% if row.on_time_pct is not None %}
+              {{ row.on_time_pct|floatformat:0 }}% on-time
+            {% else %}
+              <span class="dim">—</span>
+            {% endif %}
+          </div>
+        </div>
+      {% empty %}
+        <div class="muted">No predictions yet. Use the estimator first.</div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <!-- Recent predictions -->
+  <section class="card" style="padding: 0;">
+    <div class="card-head" style="padding: 1.2rem 1.6rem; margin: 0;">
+      <h2>Recent predictions</h2>
+      <span class="small">Last 15 served</span>
+    </div>
+    <table class="data-table recent-table">
+      <thead>
+        <tr>
+          <th>When</th>
+          <th>Product</th>
+          <th>Pincode</th>
+          <th>Promised</th>
+          <th>Tier</th>
+          <th>Confidence</th>
+          <th>Actual</th>
+          <th class="num">Miss</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in recent %}
+        <tr>
+          <td><span class="dim">{{ p.predicted_at|date:"M j H:i" }}</span></td>
+          <td>{{ p.product.name }}</td>
+          <td><code>{{ p.pincode }}</code></td>
+          <td>
+            {{ p.earliest_date|date:"M j" }}{% if p.earliest_date != p.latest_date %}–{{ p.latest_date|date:"M j" }}{% endif %}
+          </td>
+          <td><code>{{ p.tier_used }}</code></td>
+          <td><span class="confidence-pill {{ p.confidence }}">{{ p.confidence }}</span></td>
+          <td>{% if p.actual_delivered_at %}{{ p.actual_delivered_at|date:"M j" }}{% else %}<span class="dim">—</span>{% endif %}</td>
+          <td class="num">
+            {% if p.miss_days is not None %}
+              {% if p.miss_days > 0 %}+{{ p.miss_days }}{% else %}{{ p.miss_days }}{% endif %}
+            {% else %}<span class="dim">—</span>{% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="8" class="muted">No predictions yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <div class="resolve-hint">
+    Populate the "Actual" column with synthetic data:
+    <code>python manage.py resolve_predictions</code>
+  </div>
+
+</div>
+{% endblock %}

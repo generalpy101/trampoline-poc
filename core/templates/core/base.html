@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>{% block title %}Delivery Estimate{% endblock %}</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+{% load static %}
+<link rel="stylesheet" href="{% static 'core/styles.css' %}" />
+
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.5/dist/cdn.min.js"></script>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header-inner">
+    <a href="/" class="brand">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M3 7h13l3 4v6h-2a2 2 0 0 1-4 0H9a2 2 0 0 1-4 0H3z"/>
+        <circle cx="7" cy="17" r="1.2" fill="currentColor"/>
+        <circle cx="15" cy="17" r="1.2" fill="currentColor"/>
+        <path d="M16 11h3"/>
+      </svg>
+      Delivery&nbsp;Estimate
+      <span class="brand-meta">v0.1 · live</span>
+    </a>
+    <nav class="brand-nav">
+      <a href="/" class="{% if request.path == '/' %}active{% endif %}">Estimator</a>
+      <a href="/dashboard/" class="{% if '/dashboard/' in request.path %}active{% endif %}">Dashboard</a>
+      <a href="/admin/">Admin</a>
+    </nav>
+  </div>
+</header>
+
+<main class="site-main">
+  {% block content %}{% endblock %}
+</main>
+
+<footer class="site-footer">
+  POC · Django + Alpine.js · <strong>Solution 1</strong> on-demand cache + <strong>Solution 4</strong> statistical P{{ percentile_pct|default:"80" }}
+</footer>
+
+</body>
+</html>

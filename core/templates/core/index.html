@@ -1,0 +1,301 @@
+{% extends "core/base.html" %}
+{% block title %}Estimator · Delivery Estimate{% endblock %}
+
+{% block content %}
+<div class="container" x-data="estimator()">
+
+  <section class="hero">
+    <div>
+      <h1>When will it arrive?</h1>
+      <p class="hero-sub">
+        Live inventory and historical lane performance, joined at request time.
+        Toggle stock to zero to watch the system shift tiers in real time.
+      </p>
+    </div>
+    <div class="hero-aside">
+      <div><strong>{{ products|length }}</strong> products indexed</div>
+      <div>5 pincode clusters</div>
+      <div>3 warehouses</div>
+    </div>
+  </section>
+
+  <!-- Estimator: form left, result right -->
+  <div class="estimator-grid">
+
+    <!-- Form -->
+    <section class="card">
+      <div class="form-grid">
+        <label>
+          <span class="label">Product</span>
+          <select x-model="sku" @change="loadInventory()">
+            <option value="">Select a product…</option>
+            {% for p in products %}
+            <option value="{{ p.sku }}">{{ p.name }} · {{ p.sku }}</option>
+            {% endfor %}
+          </select>
+        </label>
+
+        <label>
+          <span class="label">Pincode</span>
+          <input type="text" x-model="pincode" placeholder="e.g. 110001" maxlength="6"
+                 @keyup.enter="getEstimate()" />
+          <span class="hint">
+            Mapped: <code>110001</code> Delhi · <code>400001</code> Mumbai · <code>560001</code> Bangalore<br/>
+            Unmapped (prefix-match demo): <code>110099</code> · <code>120001</code> · <code>880001</code>
+          </span>
+        </label>
+
+        <button class="primary" @click="getEstimate()"
+                :disabled="!sku || !pincode || loading">
+          <span x-show="!loading">Get delivery estimate →</span>
+          <span x-show="loading">Computing…</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Result column -->
+    <div>
+
+      <!-- Empty state -->
+      <section x-show="!result && !loading" x-cloak class="card empty-state">
+        <div class="empty-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
+            <path d="M3 7h13l3 4v6h-2a2 2 0 0 1-4 0H9a2 2 0 0 1-4 0H3z"/>
+            <circle cx="7" cy="17" r="1.2" fill="currentColor"/>
+            <circle cx="15" cy="17" r="1.2" fill="currentColor"/>
+          </svg>
+        </div>
+        <p class="empty-text">Pick a product and enter a pincode to begin.</p>
+      </section>
+
+      <!-- Loading skeleton -->
+      <section x-show="loading" x-cloak class="card result-skeleton">
+        <div class="skeleton-row skeleton-row-short"></div>
+        <div class="skeleton-row skeleton-row-big"></div>
+        <div class="skeleton-row"></div>
+        <div class="skeleton-row" style="width: 80%"></div>
+      </section>
+
+      <!-- Result: not serviceable -->
+      <section x-show="result && !result.serviceable && !loading" x-cloak
+               class="card result-card tier-not_serviceable">
+        <div class="result-band">
+          <span>Not yet serviceable</span>
+          <span x-text="result?.tier"></span>
+        </div>
+        <div class="result-body">
+          <div class="not-serviceable-icon">!</div>
+          <p class="result-reason" x-text="result?.reason"></p>
+          <div class="result-meta">
+            <span x-show="result?.served_from_cache" class="cache-tag">cached</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Result: normal estimate -->
+      <section x-show="result && result.serviceable && !loading" x-cloak
+               class="card result-card" :class="resultClass()">
+        <div class="result-band">
+          <span>Delivery estimate</span>
+          <span x-text="result?.tier"></span>
+        </div>
+        <div class="result-body">
+          <!-- Date -->
+          <div class="result-date-line">
+            <template x-if="result && !result.is_range">
+              <div class="date-main" x-text="formatDate(result.earliest_date)"></div>
+            </template>
+            <template x-if="result && result.is_range">
+              <div class="date-main">
+                <span x-text="formatDate(result.earliest_date)"></span>
+                <span class="date-range-sep">—</span>
+                <span x-text="formatDate(result.latest_date)"></span>
+              </div>
+            </template>
+            <div class="date-label" x-text="result?.is_range ? 'Arrives between' : 'Arrives by'"></div>
+          </div>
+
+          <!-- Reason -->
+          <p class="result-reason" x-text="result?.reason"></p>
+
+          <!-- Confidence gauge -->
+          <div class="confidence-gauge">
+            <div class="gauge-track">
+              <div class="gauge-seg" :class="confSegClass(0)"></div>
+              <div class="gauge-seg" :class="confSegClass(1)"></div>
+              <div class="gauge-seg" :class="confSegClass(2)"></div>
+            </div>
+            <div class="gauge-label" x-text="(result?.confidence || '') + ' confidence'"></div>
+          </div>
+
+          <!-- Calculation breakdown -->
+          <template x-if="result?.breakdown && result.breakdown.length">
+            <div class="breakdown">
+              <div class="breakdown-title">How we got there</div>
+              <div class="breakdown-rows">
+                <template x-for="step in result.breakdown" :key="step.label">
+                  <div class="breakdown-row">
+                    <div>
+                      <span x-text="step.label"></span>
+                      <span class="meta" x-text="step.note ? '· ' + step.note : ''"></span>
+                    </div>
+                    <div class="val">
+                      <span x-text="(step.days >= 0 ? '+' : '') + step.days"></span>
+                      <span class="meta">d</span>
+                    </div>
+                  </div>
+                </template>
+                <div class="breakdown-row total">
+                  <div>Total from today</div>
+                  <div class="val">
+                    <span x-text="result.total_days_from_today"></span>
+                    <span class="meta">d</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <!-- Comparison vs old fixed promise -->
+          <div class="comparison">
+            <span class="old">10–14 days fixed</span>
+            <span class="new" x-text="comparisonText()"></span>
+          </div>
+
+          <!-- Meta footer -->
+          <div class="result-meta">
+            <span x-show="result?.warehouse_code">Warehouse: <code x-text="result?.warehouse_code"></code></span>
+            <span x-show="result?.served_from_cache" class="cache-tag">cached</span>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+
+  <!-- Inventory table — always below, full-width -->
+  <section x-show="sku" x-cloak class="card inventory-card">
+    <div class="card-head">
+      <h2>Live inventory for <code x-text="sku"></code></h2>
+      <span class="small">Click "zero" to simulate a stock-out → estimate switches tiers</span>
+    </div>
+
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Warehouse</th>
+          <th>Code</th>
+          <th>Region</th>
+          <th class="num">Stock</th>
+          <th class="num">Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="item in inventory" :key="item.warehouse_code">
+          <tr>
+            <td><strong x-text="item.warehouse_name"></strong></td>
+            <td><code x-text="item.warehouse_code"></code></td>
+            <td><span class="region-pill" x-text="item.warehouse_region"></span></td>
+            <td class="num" :class="item.quantity === 0 ? 'oos' : ''">
+              <span x-text="item.quantity"></span>
+              <span class="dim" x-text="item.quantity === 0 ? '' : ' units'"></span>
+            </td>
+            <td class="num">
+              <button class="ghost"
+                      @click="zeroStock(item.warehouse_code)"
+                      x-show="item.quantity > 0">zero</button>
+              <span x-show="item.quantity === 0" class="dim">—</span>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+
+    <div class="inventory-actions">
+      <p class="small">Tip: zero out a nearby warehouse then re-estimate to see the tier switch.</p>
+      <button class="secondary" @click="restoreStock()">Restore all stock</button>
+    </div>
+  </section>
+
+</div>
+
+<script>
+function estimator() {
+  return {
+    sku: '',
+    pincode: '',
+    loading: false,
+    result: null,
+    inventory: [],
+
+    async getEstimate() {
+      if (!this.sku || !this.pincode) return;
+      this.loading = true;
+      try {
+        const r = await fetch(`/api/estimate?sku=${this.sku}&pincode=${this.pincode}`);
+        if (!r.ok) {
+          this.result = null;
+          alert('Could not fetch estimate: ' + r.statusText);
+        } else {
+          this.result = await r.json();
+        }
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async loadInventory() {
+      this.result = null;
+      if (!this.sku) { this.inventory = []; return; }
+      const r = await fetch(`/api/inventory/${this.sku}`);
+      const data = await r.json();
+      this.inventory = data.items;
+    },
+
+    async zeroStock(warehouseCode) {
+      await fetch(`/api/inventory/${this.sku}/zero/${warehouseCode}`, { method: 'POST' });
+      await this.loadInventory();
+      if (this.pincode) await this.getEstimate();
+    },
+
+    async restoreStock() {
+      await fetch(`/api/inventory/${this.sku}/restore`, { method: 'POST' });
+      await this.loadInventory();
+      if (this.pincode) await this.getEstimate();
+    },
+
+    resultClass() {
+      if (!this.result) return '';
+      return 'tier-' + this.result.tier;
+    },
+
+    confSegClass(i) {
+      const c = this.result?.confidence;
+      if (!c) return '';
+      if (c === 'high')   return i <= 2 ? 'on-high'   : '';
+      if (c === 'medium') return i <= 1 ? 'on-medium' : '';
+      if (c === 'low')    return i <= 0 ? 'on-low'    : '';
+      return '';
+    },
+
+    formatDate(iso) {
+      if (!iso) return '';
+      const d = new Date(iso + 'T00:00:00');
+      return d.toLocaleDateString('en-IN', {
+        weekday: 'short', month: 'short', day: 'numeric',
+      });
+    },
+
+    comparisonText() {
+      if (!this.result) return '';
+      const d = this.result.total_days_from_today;
+      if (this.result.is_range) {
+        const latest = Math.ceil((new Date(this.result.latest_date) - new Date()) / 86400000);
+        return `Now ${d}–${latest} days, specific to you`;
+      }
+      return `Now ${d} days, specific to you`;
+    },
+  };
+}
+</script>
+{% endblock %}

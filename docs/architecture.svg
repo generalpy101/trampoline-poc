@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 900 540" xmlns="http://www.w3.org/2000/svg" font-family="Inter, system-ui, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2f4cdd"/>
+    </marker>
+    <marker id="arrow-soft" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8a8a8a"/>
+    </marker>
+    <marker id="arrow-warm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#b45309"/>
+    </marker>
+  </defs>
+
+  <style>
+    .label { font-size: 13px; font-weight: 600; fill: #1a1a1a; }
+    .sub   { font-size: 11px; fill: #6b6b6b; }
+    .mono  { font-size: 11px; font-family: 'JetBrains Mono', monospace; fill: #6b6b6b; }
+    .head  { font-size: 11px; font-weight: 600; fill: #6b6b6b; letter-spacing: 0.1em; text-transform: uppercase; }
+  </style>
+
+  <!-- Title -->
+  <text x="450" y="32" text-anchor="middle" font-family="Fraunces, Georgia, serif" font-size="22" font-weight="600" fill="#1a1a1a">
+    Delivery Estimate POC — Architecture
+  </text>
+  <text x="450" y="54" text-anchor="middle" class="sub">
+    On-demand compute, short cache, statistical lookups built from history
+  </text>
+
+  <!-- =================== Read path =================== -->
+  <text x="40" y="92" class="head">READ PATH</text>
+
+  <!-- Browser -->
+  <g transform="translate(40, 110)">
+    <rect width="140" height="64" rx="10" fill="#ffffff" stroke="#e6e3dc" stroke-width="1.5"/>
+    <text x="70" y="30" text-anchor="middle" class="label">Browser</text>
+    <text x="70" y="48" text-anchor="middle" class="sub">Alpine.js</text>
+  </g>
+
+  <path d="M 180 142 L 230 142" stroke="#2f4cdd" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="205" y="135" text-anchor="middle" class="mono">GET</text>
+
+  <!-- Django view -->
+  <g transform="translate(235, 110)">
+    <rect width="180" height="64" rx="10" fill="#eef0ff" stroke="#2f4cdd" stroke-width="1.8"/>
+    <text x="90" y="30" text-anchor="middle" class="label" fill="#1e2f8f">Django view</text>
+    <text x="90" y="48" text-anchor="middle" class="sub" fill="#1e2f8f">cache check, dispatch</text>
+  </g>
+
+  <path d="M 415 142 L 465 142" stroke="#2f4cdd" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Cache -->
+  <g transform="translate(470, 110)">
+    <rect width="160" height="64" rx="10" fill="#ecfdf5" stroke="#047857" stroke-width="1.8"/>
+    <text x="80" y="30" text-anchor="middle" class="label" fill="#047857">Cache (Redis-like)</text>
+    <text x="80" y="48" text-anchor="middle" class="mono" fill="#047857">TTL 15 min</text>
+  </g>
+
+  <!-- on miss -->
+  <path d="M 470 158 Q 425 200 415 200 L 415 200" stroke="#8a8a8a" stroke-width="1.5" stroke-dasharray="4 3" fill="none"/>
+  <text x="425" y="195" class="sub" fill="#8a8a8a">cache miss</text>
+
+  <!-- Estimator service -->
+  <g transform="translate(235, 200)">
+    <rect width="395" height="120" rx="10" fill="#ffffff" stroke="#2f4cdd" stroke-width="1.8"/>
+    <text x="200" y="28" text-anchor="middle" class="label" fill="#1e2f8f">Estimator service · compute_estimate()</text>
+    <text x="200" y="50" text-anchor="middle" class="sub">tiered branches, top to bottom</text>
+
+    <g font-size="11.5" fill="#1a1a1a">
+      <text x="20" y="74">1.  in stock at nearest warehouse</text>
+      <text x="20" y="92">2.  in stock at farther warehouse</text>
+      <text x="20" y="110">3.  awaiting production batch (range)</text>
+      <text x="220" y="74">4.  no stats, default transit</text>
+      <text x="220" y="92">5.  no batch info, soft fallback</text>
+      <text x="220" y="110">6.  unservicable pincode</text>
+    </g>
+  </g>
+
+  <path d="M 305 320 Q 305 360 305 380" stroke="#2f4cdd" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <path d="M 555 320 Q 555 360 555 380" stroke="#2f4cdd" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Live tables -->
+  <g transform="translate(220, 385)">
+    <rect width="180" height="58" rx="10" fill="#ffffff" stroke="#e6e3dc" stroke-width="1.5"/>
+    <text x="90" y="26" text-anchor="middle" class="label">Live Postgres</text>
+    <text x="90" y="44" text-anchor="middle" class="sub">inventory, batches, pincodes</text>
+  </g>
+
+  <!-- Derived stats -->
+  <g transform="translate(465, 385)">
+    <rect width="180" height="58" rx="10" fill="#ecfdf5" stroke="#047857" stroke-width="1.5"/>
+    <text x="90" y="26" text-anchor="middle" class="label" fill="#047857">Lane stats table</text>
+    <text x="90" y="44" text-anchor="middle" class="sub" fill="#047857">pre-aggregated P50/P80/P95</text>
+  </g>
+
+  <!-- =================== Write path =================== -->
+  <text x="690" y="92" class="head">REFRESH PATH</text>
+
+  <!-- DeliveryRecord history -->
+  <g transform="translate(690, 110)">
+    <rect width="170" height="64" rx="10" fill="#ffffff" stroke="#e6e3dc" stroke-width="1.5"/>
+    <text x="85" y="30" text-anchor="middle" class="label">Delivery records</text>
+    <text x="85" y="48" text-anchor="middle" class="sub">history (months of orders)</text>
+  </g>
+
+  <path d="M 775 174 L 775 210" stroke="#b45309" stroke-width="1.5" marker-end="url(#arrow-warm)"/>
+  <text x="785" y="195" class="sub" fill="#b45309">nightly</text>
+
+  <!-- Aggregation job -->
+  <g transform="translate(690, 215)">
+    <rect width="170" height="64" rx="10" fill="#fef3c7" stroke="#b45309" stroke-width="1.5"/>
+    <text x="85" y="30" text-anchor="middle" class="label" fill="#b45309">Aggregation job</text>
+    <text x="85" y="48" text-anchor="middle" class="mono" fill="#b45309">refresh_lane_stats</text>
+  </g>
+
+  <path d="M 690 280 Q 660 350 645 385" stroke="#b45309" stroke-width="1.5" marker-end="url(#arrow-warm)"/>
+  <text x="640" y="340" class="sub" fill="#b45309" transform="rotate(-50, 640, 340)">writes</text>
+
+  <!-- Side: Predictions / Dashboard -->
+  <g transform="translate(690, 320)">
+    <rect width="170" height="64" rx="10" fill="#eef0ff" stroke="#2f4cdd" stroke-width="1.5"/>
+    <text x="85" y="30" text-anchor="middle" class="label" fill="#1e2f8f">Shadow log</text>
+    <text x="85" y="48" text-anchor="middle" class="sub" fill="#1e2f8f">predictions, dashboard</text>
+  </g>
+
+  <path d="M 555 200 Q 670 290 690 352" stroke="#8a8a8a" stroke-width="1.2" stroke-dasharray="3 3" fill="none"/>
+  <text x="640" y="230" class="sub" fill="#8a8a8a">every prediction</text>
+
+  <!-- Footer note -->
+  <text x="450" y="500" text-anchor="middle" class="sub">
+    Each tier is 10 readable lines. Replacing the stats lookup with an ML predictor changes nothing else.
+  </text>
+  <text x="450" y="518" text-anchor="middle" class="sub" font-style="italic">
+    Real production would swap the cache for Redis and the aggregation job for Airflow / dbt.
+  </text>
+</svg>
