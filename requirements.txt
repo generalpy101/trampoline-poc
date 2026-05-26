@@ -1,3 +1,9 @@
 # Django 4.2 LTS supports Python 3.9+; Django 5.x needs Python 3.10+.
-# Pinned to allow either — the POC uses no version-specific APIs.
+# Pinned to allow either — the app uses no version-specific APIs.
 Django>=4.2,<6.0
+
+# Production server. Gunicorn for WSGI.
+gunicorn>=21.0,<24.0
+
+# Static file serving without nginx/CDN in front of the app.
+whitenoise[brotli]>=6.6,<7.0

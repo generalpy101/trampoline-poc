@@ -168,6 +168,78 @@ poc/
 
 ---
 
+## Deployment (VPS)
+
+Targets a single VPS running modern Linux (Ubuntu / Debian / etc.) with systemd. SQLite is the production database, gunicorn is the app server, nginx (optional) is the reverse proxy.
+
+**Why SQLite in production.** At this scale, SQLite is fast, dependency-free, and avoids an entire class of operational concerns. `core/apps.py` enables WAL mode on every connection so reads proceed in parallel with the single writer. `synchronous=NORMAL` and `busy_timeout=5000ms` round it out. Comfortably good enough for the traffic this app is designed for.
+
+The `deploy/` directory contains:
+
+- `delivery-estimate.service` — systemd unit (runs gunicorn under a dedicated unprivileged user with filesystem hardening)
+- `nginx.conf.example` — reverse proxy config with TLS and static-file passthrough
+- `deploy.sh` — one-command update script for subsequent deploys
+
+### First-time setup
+
+```bash
+# As root, create the system user and directories
+sudo useradd --system --shell /usr/sbin/nologin --home /var/www/delivery-estimate delivery
+sudo mkdir -p /var/www/delivery-estimate /var/lib/delivery-estimate
+sudo chown -R delivery:delivery /var/www/delivery-estimate /var/lib/delivery-estimate
+
+# Clone the repo into place
+sudo -u delivery git clone <your-repo-url> /var/www/delivery-estimate
+cd /var/www/delivery-estimate
+
+# Bootstrap venv + dependencies
+sudo -u delivery python3 -m venv .venv
+sudo -u delivery .venv/bin/pip install -r requirements.txt
+sudo -u delivery .venv/bin/python manage.py migrate
+sudo -u delivery .venv/bin/python manage.py seed_data            # optional, demo data
+sudo -u delivery .venv/bin/python manage.py refresh_lane_stats   # optional
+sudo -u delivery .venv/bin/python manage.py collectstatic --noinput
+
+# Drop the env file (copy .env.example, fill in real values)
+sudo install -m 640 -o root -g delivery .env.example /etc/delivery-estimate.env
+sudo vim /etc/delivery-estimate.env   # set DJANGO_SECRET_KEY, ALLOWED_HOSTS, etc.
+
+# Install and start the service
+sudo install -m 644 deploy/delivery-estimate.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now delivery-estimate
+sudo systemctl status delivery-estimate
+```
+
+### Nginx + TLS (optional but recommended)
+
+```bash
+sudo cp deploy/nginx.conf.example /etc/nginx/sites-available/delivery-estimate
+sudo vim /etc/nginx/sites-available/delivery-estimate   # set your domain
+sudo ln -s /etc/nginx/sites-available/delivery-estimate /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+
+# TLS via Let's Encrypt
+sudo certbot --nginx -d your-domain.com
+```
+
+With nginx in front, set `DJANGO_SSL_REDIRECT=false` in `/etc/delivery-estimate.env` (nginx does the redirect) and reload: `sudo systemctl reload delivery-estimate`.
+
+### Subsequent deploys
+
+```bash
+cd /var/www/delivery-estimate
+sudo -u delivery ./deploy/deploy.sh
+```
+
+That does `git pull → pip install → migrate → collectstatic → systemctl reload`. Gunicorn reloads workers gracefully on SIGHUP, so requests in flight finish without disruption.
+
+### Without nginx
+
+If you don't want nginx, gunicorn can face the internet directly. WhiteNoise handles static files. Keep `DJANGO_SSL_REDIRECT=true` and put TLS termination somewhere (Cloudflare, Caddy, or run gunicorn with `--certfile/--keyfile`).
+
+---
+
 ## Running the tests
 
 ```bash

@@ -1,17 +1,64 @@
 """
-Django settings for the delivery estimate POC.
+Django settings.
 
-Optimized for demonstration: SQLite, local-memory cache, debug on.
-For production, swap to Postgres, Redis, set DEBUG=False, etc.
+Local development uses sensible defaults (SQLite, debug on, in-memory cache).
+For production, set these environment variables:
+
+    DJANGO_SECRET_KEY        required, any long random string
+    DJANGO_DEBUG             default "false"
+    DJANGO_ALLOWED_HOSTS     comma-separated, default "localhost,127.0.0.1"
+    SQLITE_PATH              optional; absolute path to the SQLite file
+                             (set this to a mounted persistent volume in prod)
+
+For local dev you can ignore all of these — defaults make the app run.
 """
 
+import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = "poc-not-for-production-do-not-use-this-key-in-real-life"
-DEBUG = True
-ALLOWED_HOSTS = ["*"]
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    return os.environ.get(name, str(default)).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _env_list(name: str, default: str) -> list[str]:
+    return [h.strip() for h in os.environ.get(name, default).split(",") if h.strip()]
+
+
+# ----- Core ---------------------------------------------------------------
+
+SECRET_KEY = os.environ.get(
+    "DJANGO_SECRET_KEY",
+    "dev-only-key-do-not-use-in-production-set-DJANGO_SECRET_KEY-instead",
+)
+DEBUG = _env_bool("DJANGO_DEBUG", default=True)
+ALLOWED_HOSTS = _env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,0.0.0.0")
+
+# Trust the X-Forwarded-Proto header from a reverse proxy (nginx, Caddy).
+# Required so Django knows the request is HTTPS even though gunicorn
+# receives it as HTTP on the local socket. Safe as long as your proxy
+# strips client-supplied X-Forwarded-* headers (nginx default behavior).
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# Production hardening when DEBUG is off.
+if not DEBUG:
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_SSL_REDIRECT = _env_bool("DJANGO_SSL_REDIRECT", default=True)
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    X_FRAME_OPTIONS = "DENY"
+
+# CSRF: trust hosts behind HTTPS for cross-origin POST (the inventory toggles)
+CSRF_TRUSTED_ORIGINS = [
+    f"https://{host}" for host in ALLOWED_HOSTS if host not in ("localhost", "127.0.0.1", "0.0.0.0")
+]
+
+
+# ----- Apps & middleware --------------------------------------------------
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -25,6 +72,9 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # WhiteNoise serves static files without needing nginx/CDN. Must come
+    # right after SecurityMiddleware. No-op if whitenoise isn't installed.
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -53,12 +103,40 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "delivery_estimate.wsgi.application"
 
+
+# ----- Database -----------------------------------------------------------
+# SQLite, including in production. Fine for the traffic this POC sees.
+# Set SQLITE_PATH to an absolute path on the production filesystem
+# (e.g. /var/lib/delivery-estimate/db.sqlite3 on a VPS).
+#
+# WAL mode + reasonable busy_timeout is set in core/apps.py so concurrent
+# reads don't block on a single writer.
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "NAME": os.environ.get("SQLITE_PATH") or (BASE_DIR / "db.sqlite3"),
+        "OPTIONS": {
+            "timeout": 30,                # seconds to wait if DB is busy
+            "transaction_mode": "IMMEDIATE",  # Django 5.1+; ignored on older
+        },
     }
 }
+
+
+# ----- Static files -------------------------------------------------------
+
+STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"  # destination for `collectstatic`
+
+# Compressed, hashed static files served by WhiteNoise.
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+}
+
+
+# ----- Misc ---------------------------------------------------------------
 
 AUTH_PASSWORD_VALIDATORS = []
 
@@ -67,30 +145,59 @@ TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = "static/"
-
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# ----- POC-specific cache (Solution 1 + 4 stack) -----
-# In prod this would be Redis. In-memory is fine for the demo.
-CACHES = {
-    "default": {
-        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-        "LOCATION": "delivery-estimate-cache",
-        "TIMEOUT": 900,  # 15 minutes — the central freshness/load tradeoff
+
+# ----- Cache --------------------------------------------------------------
+# Local-memory cache by default. In production, point at Redis via
+# REDIS_URL (e.g. redis://default:password@host:6379/0).
+
+if os.environ.get("REDIS_URL"):
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": os.environ["REDIS_URL"],
+            "TIMEOUT": 900,
+        }
     }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "delivery-estimate-cache",
+            "TIMEOUT": 900,  # 15 minutes — the central freshness/load tradeoff
+        }
+    }
+
+
+# ----- Logging ------------------------------------------------------------
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "standard": {"format": "[{asctime}] {levelname} {name}: {message}", "style": "{"},
+    },
+    "handlers": {
+        "console": {"class": "logging.StreamHandler", "formatter": "standard"},
+    },
+    "root": {"handlers": ["console"], "level": "INFO"},
+    "loggers": {
+        "django.server": {"handlers": ["console"], "level": "INFO", "propagate": False},
+    },
 }
 
-# ----- Delivery estimate tuning -----
+
+# ----- Delivery estimate tuning ------------------------------------------
 # The percentile we promise to customers. Raise for fewer broken promises,
 # lower for faster promised dates.
-DELIVERY_PROMISE_PERCENTILE = 0.80
+DELIVERY_PROMISE_PERCENTILE = float(os.environ.get("DELIVERY_PROMISE_PERCENTILE", "0.80"))
 
 # Handling buffer (today → ready to ship). Realistic for a furniture warehouse.
-HANDLING_BUFFER_DAYS = 1
+HANDLING_BUFFER_DAYS = int(os.environ.get("HANDLING_BUFFER_DAYS", "1"))
 
 # Minimum samples needed before we trust a lane's statistics.
-MIN_SAMPLES_FOR_LANE = 10
+MIN_SAMPLES_FOR_LANE = int(os.environ.get("MIN_SAMPLES_FOR_LANE", "10"))
 
 # Fallback transit if a lane has no statistics yet (new warehouse, new region).
-DEFAULT_TRANSIT_DAYS = 10
+DEFAULT_TRANSIT_DAYS = int(os.environ.get("DEFAULT_TRANSIT_DAYS", "10"))

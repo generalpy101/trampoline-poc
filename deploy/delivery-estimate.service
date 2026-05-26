@@ -1,0 +1,44 @@
+[Unit]
+Description=Delivery Estimate (Django + gunicorn)
+After=network.target
+
+[Service]
+# Run as a dedicated unprivileged user. Create with:
+#   sudo useradd --system --shell /usr/sbin/nologin --home /var/www/delivery-estimate delivery
+User=delivery
+Group=delivery
+
+WorkingDirectory=/var/www/delivery-estimate
+
+# Read environment variables (DJANGO_SECRET_KEY, DJANGO_ALLOWED_HOSTS, etc.)
+# from a separate file so secrets stay out of the unit file.
+# Create with:
+#   sudo install -m 640 -o root -g delivery /dev/stdin /etc/delivery-estimate.env
+EnvironmentFile=/etc/delivery-estimate.env
+
+ExecStart=/var/www/delivery-estimate/.venv/bin/gunicorn \
+    delivery_estimate.wsgi:application \
+    --config /var/www/delivery-estimate/gunicorn.conf.py
+
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=20
+
+# ----- Hardening -----
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+# Paths the service is allowed to write to:
+#   - SQLite database directory (set SQLITE_PATH parent here)
+#   - Django's collectstatic destination
+ReadWritePaths=/var/lib/delivery-estimate /var/www/delivery-estimate/staticfiles
+
+[Install]
+WantedBy=multi-user.target
