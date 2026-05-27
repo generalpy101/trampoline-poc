@@ -40,6 +40,9 @@ pip install -q -r requirements.txt
 echo "→ Running migrations"
 python manage.py migrate --noinput >/dev/null
 
+echo "→ Creating cache table (idempotent)"
+python manage.py createcachetable >/dev/null 2>&1 || true
+
 echo "→ Seeding catalog, history, batches, and demo predictions"
 python manage.py seed_data
 

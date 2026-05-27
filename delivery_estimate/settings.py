@@ -154,8 +154,13 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
 # ----- Cache --------------------------------------------------------------
-# Local-memory cache by default. In production, point at Redis via
-# REDIS_URL (e.g. redis://default:password@host:6379/0).
+# Default: database cache backed by the same SQLite file. Works correctly
+# across multiple gunicorn workers (locmem would silo cache state per process,
+# which breaks invalidation when one worker mutates inventory but the next
+# request lands on another worker).
+#
+# Create the cache table once with:   python manage.py createcachetable
+# Optionally swap to Redis by setting REDIS_URL.
 
 if os.environ.get("REDIS_URL"):
     CACHES = {
@@ -168,9 +173,9 @@ if os.environ.get("REDIS_URL"):
 else:
     CACHES = {
         "default": {
-            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-            "LOCATION": "delivery-estimate-cache",
-            "TIMEOUT": 900,  # 15 minutes — the central freshness/load tradeoff
+            "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+            "LOCATION": "delivery_estimate_cache",
+            "TIMEOUT": 900,  # 15 minutes — central freshness/load tradeoff
         }
     }
 

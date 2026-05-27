@@ -12,6 +12,14 @@ SERVICE="${SERVICE:-delivery-estimate}"
 
 cd "$APP_DIR"
 
+# Load env vars so manage.py uses the configured SQLITE_PATH and friends
+if [ -f /etc/delivery-estimate.env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . /etc/delivery-estimate.env
+  set +a
+fi
+
 echo "→ git pull"
 git pull --ff-only
 
@@ -20,6 +28,9 @@ echo "→ install dependencies"
 
 echo "→ migrate"
 .venv/bin/python manage.py migrate --noinput
+
+echo "→ create cache table (idempotent)"
+.venv/bin/python manage.py createcachetable >/dev/null 2>&1 || true
 
 echo "→ collectstatic"
 .venv/bin/python manage.py collectstatic --noinput
