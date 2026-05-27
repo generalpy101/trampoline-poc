@@ -37,6 +37,10 @@ def index(request: HttpRequest):
     return render(request, "core/index.html", {"products": products})
 
 
+def how_it_works(request: HttpRequest):
+    return render(request, "core/how_it_works.html")
+
+
 def dashboard(request: HttpRequest):
     qs = Prediction.objects.all()
     resolved = qs.filter(actual_delivered_at__isnull=False)

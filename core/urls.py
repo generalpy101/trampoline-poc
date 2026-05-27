@@ -5,6 +5,7 @@ from . import views
 urlpatterns = [
     path("", views.index, name="index"),
     path("dashboard/", views.dashboard, name="dashboard"),
+    path("how-it-works/", views.how_it_works, name="how_it_works"),
 
     # API used by Alpine.js
     path("api/estimate", views.api_estimate, name="api_estimate"),

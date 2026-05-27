@@ -754,6 +754,224 @@ button.ghost:hover { color: var(--rust); border-color: var(--rust); background: 
   margin-top: 0.4rem;
 }
 
+/* ===== Prose page (How it works) ===== */
+
+.prose { max-width: 720px; }
+
+.prose-h2 {
+  font-family: 'Fraunces', serif;
+  font-size: 1.6rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin-top: 3rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.prose h3 {
+  font-family: 'Inter', sans-serif;
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin-top: 2rem;
+  margin-bottom: 0.6rem;
+  color: var(--ink);
+}
+
+.prose h4 {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 0.8rem;
+}
+
+.prose p {
+  font-size: 0.96rem;
+  line-height: 1.7;
+  margin: 0 0 1rem;
+  color: var(--ink-2);
+}
+
+.prose ul, .prose ol {
+  margin: 0 0 1.2rem;
+  padding-left: 1.5rem;
+  font-size: 0.96rem;
+  line-height: 1.6;
+}
+
+.prose ul li, .prose ol li {
+  margin-bottom: 0.5rem;
+  color: var(--ink-2);
+}
+
+.prose-lead {
+  font-size: 1.02rem;
+  color: var(--ink-2);
+  margin: 0.6rem 0 1.4rem;
+}
+
+.prose pre {
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 1rem 1.2rem;
+  overflow-x: auto;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  color: var(--ink);
+  margin: 1rem 0 1.4rem;
+}
+
+.prose pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 0.85rem;
+  color: var(--ink);
+}
+
+/* Quote-style callout for the "what to say" blocks */
+.callout-quote {
+  border-left: 3px solid var(--rust);
+  background: var(--rust-soft);
+  padding: 1rem 1.2rem;
+  margin: 0 0 1.6rem;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.callout-quote p {
+  margin: 0 0 0.6rem;
+  font-size: 0.95rem;
+  line-height: 1.65;
+  color: var(--ink);
+  font-style: italic;
+}
+.callout-quote p:last-child { margin-bottom: 0; }
+
+/* Demo step list (the 5 numbered clicks) */
+.demo-steps {
+  list-style: none;
+  padding: 0;
+  counter-reset: demo;
+  margin: 0 0 2rem;
+}
+.demo-steps li {
+  counter-increment: demo;
+  position: relative;
+  padding: 1.1rem 1.2rem 1.1rem 3.4rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 0.9rem;
+}
+.demo-steps li::before {
+  content: counter(demo);
+  position: absolute;
+  left: 1rem;
+  top: 1.1rem;
+  width: 1.8rem;
+  height: 1.8rem;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--on-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Fraunces', serif;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+.demo-steps .step-title {
+  font-weight: 600;
+  color: var(--ink);
+  font-size: 0.95rem;
+  margin-bottom: 0.4rem;
+}
+.demo-steps .step-do {
+  font-size: 0.88rem;
+  color: var(--muted);
+  margin-bottom: 0.5rem;
+}
+.demo-steps .step-do code {
+  background: var(--surface-2);
+  padding: 0.1em 0.45em;
+}
+.demo-steps .step-say {
+  font-size: 0.92rem;
+  font-style: italic;
+  color: var(--ink-2);
+  line-height: 1.6;
+  padding: 0.7rem 0.9rem;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+}
+
+/* Tables on the explainer page */
+.explainer-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0 1.6rem;
+  font-size: 0.9rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.explainer-table th {
+  text-align: left;
+  padding: 0.7rem 1rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+  color: var(--muted);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--surface-2);
+}
+.explainer-table td {
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid var(--border-soft);
+  vertical-align: top;
+  color: var(--ink-2);
+}
+.explainer-table tr:last-child td { border-bottom: none; }
+.explainer-table code {
+  background: var(--surface-2);
+  padding: 0.1em 0.4em;
+  font-size: 0.85em;
+}
+
+/* Two-column AI usage block */
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.4rem;
+  margin: 1rem 0 1.8rem;
+}
+.two-col > div {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.2rem 1.3rem;
+}
+.two-col ul { margin: 0; padding-left: 1.2rem; }
+.two-col li { font-size: 0.88rem; margin-bottom: 0.5rem; }
+@media (max-width: 640px) {
+  .two-col { grid-template-columns: 1fr; }
+}
+
+/* Flow diagram container */
+.flow-diagram {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+  margin: 1rem 0 1.8rem;
+}
+.flow-diagram svg { max-width: 100%; height: auto; display: block; }
+
 /* ===== Footer ===== */
 
 .site-footer {
