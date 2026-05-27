@@ -1,0 +1,180 @@
+{% extends "core/base.html" %}
+{% block title %}Overview · Delivery Estimate{% endblock %}
+
+{% block content %}
+<div class="container container-narrow">
+
+  <section class="hero">
+    <div>
+      <h1>Overview</h1>
+      <p class="hero-sub">
+        A delivery date prediction service for a D2C furniture brand.
+        Replaces the fixed "10 to 14 days" promise with a personalized date
+        per product and pincode.
+      </p>
+    </div>
+  </section>
+
+  <article class="prose">
+
+    <h2 class="prose-h2">The problem</h2>
+    <p>
+      The brand sells large items — sofas, beds, dining tables — out of
+      three warehouses, through several carriers, with some products on
+      regular production batches and others made to order. Today every
+      customer sees the same fixed delivery promise of "10 to 14 days"
+      regardless of where they live or what they're buying.
+    </p>
+    <p>
+      That promise is wrong in both directions. A customer in a city
+      with a warehouse next door could have had the item in 4 days and
+      buys from a faster competitor instead. A customer waiting on a
+      delayed production batch actually waits 25 days and leaves a bad
+      review. The brand loses on both sides.
+    </p>
+
+    <h2 class="prose-h2">What the system does</h2>
+    <p>
+      The Delivery Estimate Service exposes one endpoint that, given a
+      product and a customer pincode, returns a delivery date along with
+      a confidence level, a human-readable reason, and a breakdown of
+      how the date was computed.
+    </p>
+    <p>
+      It does this by joining three data sources at request time:
+      <strong>live inventory</strong> (which warehouse has the product
+      now), <strong>scheduled production batches</strong> (when out-of-stock
+      items will land, and from which supplier), and
+      <strong>historical delivery records</strong> (how long deliveries
+      actually take on each lane).
+    </p>
+
+    <h2 class="prose-h2">The decision tree</h2>
+    <p>
+      For any request, the service walks down a four-branch decision tree
+      and returns the first branch that applies.
+    </p>
+
+    <div class="flow-diagram">
+      <svg viewBox="0 0 720 480" xmlns="http://www.w3.org/2000/svg" class="chart-svg">
+        <defs>
+          <marker id="ovrarr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0,0 L10,5 L0,10 z" fill="#1a1814"/>
+          </marker>
+          <style>
+            .node { fill: #ffffff; stroke: #1a1814; stroke-width: 1.4; }
+            .node-good { fill: #e4f1ea; stroke: #1f7a4f; }
+            .node-warn { fill: #f7ead0; stroke: #a85d12; }
+            .node-bad  { fill: #f5dcd8; stroke: #a32419; }
+            .lbl { font-family: 'Inter', sans-serif; font-size: 12px; fill: #1a1814; }
+            .lbl-sm { font-family: 'JetBrains Mono', monospace; font-size: 10px; fill: #6b655c; }
+            .edge { stroke: #1a1814; stroke-width: 1.2; fill: none; }
+            .edge-soft { stroke: #95908a; stroke-width: 1.2; fill: none; stroke-dasharray: 3 3; }
+            .edge-lbl { font-family: 'JetBrains Mono', monospace; font-size: 10px; fill: #6b655c; }
+          </style>
+        </defs>
+
+        <rect class="node" x="260" y="12" width="200" height="40" rx="6"/>
+        <text class="lbl" x="360" y="36" text-anchor="middle">request (product, pincode)</text>
+        <path class="edge" d="M360,52 L360,80" marker-end="url(#ovrarr)"/>
+
+        <rect class="node" x="220" y="80" width="280" height="46" rx="6"/>
+        <text class="lbl" x="360" y="102" text-anchor="middle">resolve pincode → delivery zone</text>
+        <text class="lbl-sm" x="360" y="118" text-anchor="middle">exact → district → state → region</text>
+        <path class="edge" d="M360,126 L360,160" marker-end="url(#ovrarr)"/>
+
+        <path class="edge-soft" d="M220,103 L40,103 L40,420 L120,420" marker-end="url(#ovrarr)"/>
+        <text class="edge-lbl" x="50" y="96">no match</text>
+
+        <rect class="node" x="240" y="160" width="240" height="46" rx="6"/>
+        <text class="lbl" x="360" y="182" text-anchor="middle">check inventory</text>
+        <text class="lbl-sm" x="360" y="198" text-anchor="middle">any stock anywhere?</text>
+
+        <path class="edge" d="M240,183 L160,183 L160,240" marker-end="url(#ovrarr)"/>
+        <text class="edge-lbl" x="170" y="178">yes</text>
+
+        <rect class="node node-good" x="40" y="240" width="240" height="60" rx="6"/>
+        <text class="lbl" x="160" y="262" text-anchor="middle">pick fastest warehouse</text>
+        <text class="lbl-sm" x="160" y="278" text-anchor="middle">same region wins ties</text>
+        <text class="lbl-sm" x="160" y="293" text-anchor="middle">today + handling + P80(transit)</text>
+
+        <path class="edge" d="M480,183 L560,183 L560,240" marker-end="url(#ovrarr)"/>
+        <text class="edge-lbl" x="528" y="178">no</text>
+
+        <rect class="node" x="440" y="240" width="240" height="46" rx="6"/>
+        <text class="lbl" x="560" y="262" text-anchor="middle">scheduled batch?</text>
+        <text class="lbl-sm" x="560" y="278" text-anchor="middle">production / supplier system</text>
+
+        <path class="edge" d="M440,263 L380,263 L380,320" marker-end="url(#ovrarr)"/>
+        <text class="edge-lbl" x="390" y="258">yes</text>
+
+        <rect class="node node-warn" x="260" y="320" width="240" height="76" rx="6"/>
+        <text class="lbl" x="380" y="342" text-anchor="middle">date range</text>
+        <text class="lbl-sm" x="380" y="358" text-anchor="middle">earliest = batch_date + handling</text>
+        <text class="lbl-sm" x="380" y="372" text-anchor="middle">           + P80(transit)</text>
+        <text class="lbl-sm" x="380" y="386" text-anchor="middle">latest = earliest + supplier slip</text>
+
+        <path class="edge" d="M680,263 L680,420 L600,420" marker-end="url(#ovrarr)"/>
+        <text class="edge-lbl" x="640" y="278">no</text>
+
+        <rect class="node" x="440" y="400" width="180" height="40" rx="6"/>
+        <text class="lbl" x="530" y="424" text-anchor="middle">soft fallback (3–5 weeks)</text>
+
+        <rect class="node node-bad" x="120" y="400" width="180" height="40" rx="6"/>
+        <text class="lbl" x="210" y="424" text-anchor="middle">not yet available</text>
+
+      </svg>
+    </div>
+
+    <h2 class="prose-h2">The four cases</h2>
+
+    <table class="explainer-table">
+      <thead>
+        <tr><th>Case</th><th>When it fires</th><th>What the customer sees</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>In stock nearby</strong></td>
+          <td>Stock at a warehouse in the customer's own region</td>
+          <td>A single date, high confidence</td>
+        </tr>
+        <tr>
+          <td><strong>In stock farther</strong></td>
+          <td>Stock available, but only at a warehouse outside the customer's region</td>
+          <td>A single date, high confidence, slightly later</td>
+        </tr>
+        <tr>
+          <td><strong>Awaiting batch</strong></td>
+          <td>Out of stock, but a production batch is scheduled with a known supplier</td>
+          <td>A <em>date range</em> sized by supplier reliability, medium or low confidence</td>
+        </tr>
+        <tr>
+          <td><strong>Soft fallback / not serviceable</strong></td>
+          <td>Out of stock with no scheduled batch, or pincode in an unserved region</td>
+          <td>A wide range or a clear "not yet available" message</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2 class="prose-h2">What's deliberately out of scope</h2>
+    <p>
+      The system runs on-demand compute with a short cache, backed by
+      nightly-refreshed statistics. That's a deliberate starting point for
+      this scale of brand. The architecture has obvious next steps for
+      higher traffic: precomputed hot-sets, event-driven cache invalidation,
+      and a learned model in place of bucket statistics. None are worth
+      building until the dashboard says they are. See
+      <a href="/technical/">Technical</a> for details.
+    </p>
+
+    <div class="docs-footer-nav">
+      <span class="dim">Next:</span>
+      <a href="/algorithm/">Algorithm →</a>
+      &nbsp;·&nbsp;
+      <a href="/technical/">Technical →</a>
+    </div>
+
+  </article>
+
+</div>
+{% endblock %}

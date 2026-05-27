@@ -37,8 +37,16 @@ def index(request: HttpRequest):
     return render(request, "core/index.html", {"products": products})
 
 
-def how_it_works(request: HttpRequest):
-    return render(request, "core/how_it_works.html")
+def overview(request: HttpRequest):
+    return render(request, "core/docs_overview.html")
+
+
+def algorithm(request: HttpRequest):
+    return render(request, "core/docs_algorithm.html")
+
+
+def technical(request: HttpRequest):
+    return render(request, "core/docs_technical.html")
 
 
 def dashboard(request: HttpRequest):

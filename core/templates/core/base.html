@@ -30,7 +30,9 @@
     <nav class="brand-nav">
       <a href="/" class="{% if request.path == '/' %}active{% endif %}">Estimator</a>
       <a href="/dashboard/" class="{% if '/dashboard/' in request.path %}active{% endif %}">Dashboard</a>
-      <a href="/how-it-works/" class="{% if '/how-it-works/' in request.path %}active{% endif %}">How it works</a>
+      <a href="/overview/" class="{% if '/overview/' in request.path %}active{% endif %}">Overview</a>
+      <a href="/algorithm/" class="{% if '/algorithm/' in request.path %}active{% endif %}">Algorithm</a>
+      <a href="/technical/" class="{% if '/technical/' in request.path %}active{% endif %}">Technical</a>
     </nav>
   </div>
 </header>

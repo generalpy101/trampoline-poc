@@ -1,0 +1,291 @@
+{% extends "core/base.html" %}
+{% block title %}Technical · Delivery Estimate{% endblock %}
+
+{% block content %}
+<div class="container container-narrow">
+
+  <section class="hero">
+    <div>
+      <h1>Technical</h1>
+      <p class="hero-sub">
+        Service shape, data model, caching, and the operational details
+        that turn the algorithm into a working system.
+      </p>
+    </div>
+  </section>
+
+  <article class="prose">
+
+    <h2 class="prose-h2">Service shape</h2>
+
+    <p>
+      A single Django app, <code>core</code>, exposes one JSON endpoint
+      that the storefront calls per product view:
+    </p>
+
+<pre><code>GET /api/estimate?sku=&lt;product_id&gt;&amp;pincode=&lt;pincode&gt;
+
+Response:
+{
+  "earliest_date":          "2026-06-10",
+  "latest_date":            "2026-06-10",
+  "is_range":               false,
+  "confidence":             "high",
+  "tier":                   "in_stock_nearest",
+  "tier_label":             "In stock nearby",
+  "reason":                 "In stock at our Delhi warehouse",
+  "warehouse_code":         "WH-DEL",
+  "total_days_from_today":  4,
+  "breakdown":              [ ... ],
+  "serviceable":            true,
+  "served_from_cache":      false
+}</code></pre>
+
+    <p>
+      Two helper endpoints support the demo interface
+      (<code>/api/inventory/&lt;sku&gt;</code> and POST endpoints to mutate
+      stock); production deployments would protect those with auth.
+    </p>
+
+    <h2 class="prose-h2">Data sources</h2>
+
+    <table class="explainer-table">
+      <thead>
+        <tr><th>Source</th><th>What it gives us</th><th>Refresh</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Warehouse system</td>
+          <td>Live stock per (product, warehouse)</td>
+          <td>Real-time, read at request time</td>
+        </tr>
+        <tr>
+          <td>Production / supplier system</td>
+          <td>Pending batches with promised date, quantity, and supplier ID</td>
+          <td>Real-time, read at request time</td>
+        </tr>
+        <tr>
+          <td>Order management</td>
+          <td>Completed deliveries: shipped_at, delivered_at, lane, carrier</td>
+          <td>Daily aggregation into pre-computed per-lane percentiles</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      The first two sources are read live (and cheap — they're indexed
+      lookups). The third feeds the pre-aggregated
+      <code>LanePerformance</code> table; the estimator never queries raw
+      delivery history at request time.
+    </p>
+
+    <h2 class="prose-h2">Data model</h2>
+
+    <table class="explainer-table">
+      <thead><tr><th>Table</th><th>Holds</th></tr></thead>
+      <tbody>
+        <tr><td><code>Warehouse</code></td><td>Warehouses with their region (north / west / south / east)</td></tr>
+        <tr><td><code>Product</code></td><td>SKU, name, category, weight class, supplier</td></tr>
+        <tr><td><code>Supplier</code></td><td>Production suppliers</td></tr>
+        <tr><td><code>PincodeCluster</code></td><td>Delivery zones (~2k in production)</td></tr>
+        <tr><td><code>PincodeMapping</code></td><td>Pincode → cluster lookup table</td></tr>
+        <tr><td><code>Inventory</code></td><td>Current stock per (product, warehouse)</td></tr>
+        <tr><td><code>ProductionBatch</code></td><td>Scheduled, in-transit, and received batches</td></tr>
+        <tr><td><code>DeliveryRecord</code></td><td>Every completed shipment — the history we learn from</td></tr>
+        <tr><td><code>LanePerformance</code></td><td>Per-lane P50/P80/P95 transit (refreshed nightly)</td></tr>
+        <tr><td><code>SupplierReliability</code></td><td>Per-supplier P50/P80 slip days against promised batch date</td></tr>
+        <tr><td><code>Prediction</code></td><td>Shadow log of every estimate served, later joined to actual outcome</td></tr>
+      </tbody>
+    </table>
+
+    <p>
+      Eleven tables, three of which (<code>LanePerformance</code>,
+      <code>SupplierReliability</code>, <code>Prediction</code>) are
+      derived from the others. The first eight model the operational
+      domain; the derived three are what makes the algorithm cheap to
+      evaluate at request time.
+    </p>
+
+    <h2 class="prose-h2">The entry point</h2>
+
+    <p>The whole tier dispatch fits in 15 lines:</p>
+
+<pre><code>def compute_estimate(product, pincode):
+    today = timezone.localdate()
+    handling = settings.HANDLING_BUFFER_DAYS
+
+    cluster, match_quality = resolve_cluster(pincode)
+    if cluster is None:
+        return _not_serviceable(today, pincode)
+
+    stocked = list(
+        Inventory.objects.select_related("warehouse")
+            .filter(product=product, quantity__gt=0)
+    )
+
+    if stocked:
+        return _estimate_in_stock(today, handling, stocked, cluster, match_quality)
+
+    return _estimate_out_of_stock(today, handling, product, cluster, match_quality)</code></pre>
+
+    <p>
+      Every branch returns the same response shape — date, confidence,
+      reason, breakdown — so the front end never needs to know which tier
+      answered. Two helper functions
+      (<code>_estimate_in_stock</code> and
+      <code>_estimate_out_of_stock</code>) contain the actual math; both
+      are small enough to read in 30 seconds.
+    </p>
+
+    <h2 class="prose-h2">Caching</h2>
+
+    <p>
+      Responses cache for 15 minutes via Django's cache framework. The
+      cache key includes more than just the obvious inputs:
+    </p>
+
+<pre><code>cache_key = (sku, cluster, match_quality, percentile)</code></pre>
+
+    <p>
+      The <code>match_quality</code> component matters because exact-pincode
+      matches and prefix-pincode matches produce different confidence
+      levels and reason text, so they must not share a cache entry. The
+      <code>percentile</code> component lets you change
+      <code>DELIVERY_PROMISE_PERCENTILE</code> in settings and immediately
+      stop serving stale entries computed under the old value.
+    </p>
+
+    <p>
+      Invalidation triggers on inventory threshold crossings (in-to-out,
+      below-safety) rather than every single quantity tick. Going from 50
+      units to 49 doesn't change the customer-facing date; going from 1 to
+      0 does. Filtering at the source keeps recompute volume bounded by
+      meaningful state changes, not by order volume.
+    </p>
+
+    <h2 class="prose-h2">SQLite in production</h2>
+
+    <p>
+      SQLite is the production database. At this scale (thousands of page
+      views per day, not millions), it's a deliberate choice: no separate
+      DB server to operate, no network round-trip on every read, and the
+      whole database can be backed up with a single file copy.
+    </p>
+
+    <p>
+      A connection signal in <code>core/apps.py</code> enables WAL mode
+      and tunes the busy timeout on every new database connection:
+    </p>
+
+<pre><code>PRAGMA journal_mode = WAL;       -- readers proceed during writes
+PRAGMA synchronous  = NORMAL;    -- durable across app crashes
+PRAGMA busy_timeout = 5000;      -- wait 5s if the writer is busy
+PRAGMA foreign_keys = ON;        -- enforce referential integrity</code></pre>
+
+    <p>
+      With these settings, SQLite comfortably handles the read/write
+      patterns of a small Django service. Migrating to Postgres later is a
+      one-line change in <code>DATABASES</code>.
+    </p>
+
+    <h2 class="prose-h2">Observability</h2>
+
+    <p>
+      Every prediction served is shadow-logged to the
+      <code>Prediction</code> table with its inputs, the tier that fired,
+      the date returned, and the confidence level. When the corresponding
+      order eventually delivers, an <code>actual_delivered_at</code>
+      column gets populated and a <code>miss_days</code> column is
+      computed.
+    </p>
+
+    <p>
+      The <a href="/dashboard/">Dashboard</a> exposes two signals that
+      tell us if the system is working:
+    </p>
+
+    <ul>
+      <li>
+        <strong>On-time rate</strong> — should sit near the configured
+        percentile (80%). A persistent drift below 75% indicates carrier
+        or warehouse problems rather than a system bug.
+      </li>
+      <li>
+        <strong>Tier distribution</strong> — how often each branch fires.
+        Sudden shifts are leading indicators of operational health: a
+        spike in "Awaiting batch" means warehouses are running short; a
+        drop in "In stock nearby" means a regional warehouse is struggling.
+      </li>
+    </ul>
+
+    <h2 class="prose-h2">Where AI fits</h2>
+
+    <div class="two-col">
+      <div>
+        <h4>Use AI for</h4>
+        <ul>
+          <li>Parsing unstructured supplier emails and PDFs about batch delays into structured arrival dates that feed the <code>ProductionBatch</code> table.</li>
+          <li>Generating the customer-facing reason copy so it reads naturally for any combination of inputs.</li>
+          <li>Drafting customer-support replies that reference the cached estimate.</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Don't use AI for</h4>
+        <ul>
+          <li>The date prediction itself. It's a commitment shown at checkout — structured math is faster, cheaper, and more debuggable than a model that can hallucinate.</li>
+          <li>Cache invalidation. It's mechanical.</li>
+          <li>The tier routing. Deterministic if-else is the right tool.</li>
+        </ul>
+      </div>
+    </div>
+
+    <h2 class="prose-h2">Scaling roadmap</h2>
+
+    <p>
+      The architecture deliberately stops short of several capabilities
+      that would be premature at this scale. The order they'd be added
+      as traffic and data complexity grew:
+    </p>
+
+    <ol>
+      <li>
+        <strong>Precomputed hot-set.</strong> Identify the top product ×
+        cluster combinations from traffic data, keep them precomputed and
+        refreshed proactively. The cold tail still computes on demand.
+      </li>
+      <li>
+        <strong>Event-driven cache invalidation.</strong> Emit events when
+        inventory crosses meaningful thresholds and recompute affected
+        entries immediately instead of waiting for the TTL.
+      </li>
+      <li>
+        <strong>Multi-carrier dimension.</strong> Track statistics per
+        (warehouse, cluster, carrier) instead of just (warehouse, cluster).
+        Pick the right carrier per request based on lane performance and
+        cost.
+      </li>
+      <li>
+        <strong>Learned model.</strong> Replace per-bucket percentile
+        lookups with a quantile regression model. Earns its keep once the
+        bucket-based approach plateaus on accuracy — typically when long-tail
+        lanes have too few samples to be reliable.
+      </li>
+    </ol>
+
+    <p>
+      None are worth building yet. The dashboard would tell us when they
+      are: a sustained on-time rate gap, a precomputation cache hit rate
+      that's lower than projected, or specific lanes whose accuracy lags
+      the rest.
+    </p>
+
+    <div class="docs-footer-nav">
+      <a href="/overview/">← Overview</a>
+      &nbsp;·&nbsp;
+      <a href="/algorithm/">← Algorithm</a>
+    </div>
+
+  </article>
+
+</div>
+{% endblock %}

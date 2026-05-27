@@ -1,0 +1,244 @@
+{% extends "core/base.html" %}
+{% block title %}Algorithm · Delivery Estimate{% endblock %}
+
+{% block content %}
+<div class="container container-narrow">
+
+  <section class="hero">
+    <div>
+      <h1>Algorithm</h1>
+      <p class="hero-sub">
+        How the system turns inventory state and historical delivery times
+        into a date the customer can trust.
+      </p>
+    </div>
+  </section>
+
+  <article class="prose">
+
+    <h2 class="prose-h2">Inputs and outputs</h2>
+
+    <p>The service takes two inputs:</p>
+    <ul>
+      <li><strong>Product</strong> — identifies the SKU and (transitively) its supplier and weight class.</li>
+      <li><strong>Pincode</strong> — the customer's delivery pincode.</li>
+    </ul>
+
+    <p>And returns:</p>
+    <ul>
+      <li>A <strong>delivery date</strong> (single date for in-stock, date range for batch-await).</li>
+      <li>A <strong>confidence level</strong> — high, medium, or low.</li>
+      <li>A <strong>human-readable reason</strong> explaining the date.</li>
+      <li>A <strong>breakdown</strong> showing each component of the total (handling, transit, supplier slip).</li>
+      <li>A <strong>serviceable flag</strong> — false when the pincode isn't in the delivery network.</li>
+    </ul>
+
+    <h2 class="prose-h2">The decision tree</h2>
+
+    <p>
+      Branches are evaluated top-down. The first branch whose condition is
+      true returns the response. There is no fall-through and no branch
+      ever returns null.
+    </p>
+
+    <table class="explainer-table">
+      <thead>
+        <tr><th>#</th><th>Condition</th><th>Result</th><th>Confidence</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>0</td>
+          <td>Pincode can't be resolved to any known cluster (no prefix match at all)</td>
+          <td>"Not yet available" — no date</td>
+          <td>—</td>
+        </tr>
+        <tr>
+          <td>1</td>
+          <td>Stock available at a warehouse in the customer's region; lane has statistics</td>
+          <td>Single date</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>Stock available only at warehouses outside the customer's region</td>
+          <td>Single date (slightly later)</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>Stock available but no lane statistics yet (new warehouse or new region)</td>
+          <td>Single date using platform default transit</td>
+          <td>Medium</td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td>Out of stock; production batch scheduled; supplier reliability known</td>
+          <td>Date range</td>
+          <td>Medium (reliable supplier) or Low (flaky)</td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>Out of stock; batch scheduled; supplier has no history yet</td>
+          <td>Wider date range (default slip)</td>
+          <td>Low</td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td>Out of stock; no batch scheduled either</td>
+          <td>3-to-5 week range (soft fallback)</td>
+          <td>Low</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2 class="prose-h2">The formulas</h2>
+
+    <h3>For in-stock items</h3>
+<pre><code>delivery_date = today
+              + handling_buffer            (default 1 day)
+              + P80(transit_days_for_lane) (from history)</code></pre>
+
+    <h3>For out-of-stock items with a scheduled batch</h3>
+<pre><code>earliest = batch_promised_date
+         + handling_buffer
+         + P80(transit_days_for_lane)
+
+latest   = earliest + P80(supplier_slip_days)</code></pre>
+
+    <p>
+      Where <code>P80(x)</code> means: sort the historical values for
+      <code>x</code> and return the value at the 80th percentile.
+    </p>
+
+    <h2 class="prose-h2">Why the 80th percentile, not the average</h2>
+
+    <p>
+      For any delivery lane, transit times follow a right-skewed
+      distribution: most deliveries land in a tight cluster, with a tail
+      of slower ones caused by weather, festivals, or carrier hiccups.
+    </p>
+
+    <table class="explainer-table">
+      <thead>
+        <tr><th>Promised value</th><th>Customers who beat it</th><th>Customers who miss</th><th>Typical miss</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>The mean (~P50)</td><td>~50%</td><td>~50%</td><td>1–8 days late</td></tr>
+        <tr><td>P80</td><td>~80%</td><td>~20%</td><td>1–2 days late</td></tr>
+        <tr><td>P95</td><td>~95%</td><td>~5%</td><td>2–5 days late, but every promise is much longer</td></tr>
+      </tbody>
+    </table>
+
+    <p>
+      P80 balances both ends. Most customers get their order on or before
+      the promised date; the few who don't miss by only a day or two. The
+      percentile is a single tunable knob in
+      <code>settings.DELIVERY_PROMISE_PERCENTILE</code>.
+    </p>
+
+    <h2 class="prose-h2">Why a date range for out-of-stock items</h2>
+
+    <p>
+      In-stock orders have one source of uncertainty — the carrier. That
+      converges quickly because we ship thousands of orders on each lane.
+    </p>
+    <p>
+      Out-of-stock orders waiting on a production batch have a
+      <strong>second</strong> source of uncertainty: the supplier. A
+      reliable supplier slips by 1 or 2 days against their promised batch
+      date. A flaky one slips by 7 or more.
+    </p>
+    <p>
+      Collapsing that into a single false-confidence date discards
+      information the brand can use to differentiate between products. The
+      range width <em>is</em> the supplier's reliability made visible to
+      the customer. They self-select: a customer who really wants the sofa
+      will accept a 5-day range; one with a tight deadline will look for a
+      different product.
+    </p>
+
+    <h2 class="prose-h2">Pincode resolution</h2>
+
+    <p>
+      India has roughly 150,000 pincodes. Tracking delivery statistics
+      per individual pincode would need years of data per zone to be
+      statistically meaningful. So pincodes are grouped into
+      <strong>delivery clusters</strong> — about 2,000 zones with similar
+      transit characteristics.
+    </p>
+
+    <p>
+      For pincodes that aren't in the explicit mapping, the resolver tries
+      progressively wider prefix matches:
+    </p>
+
+    <table class="explainer-table">
+      <thead>
+        <tr><th>Step</th><th>Match scope</th><th>Example</th><th>Confidence impact</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>Exact pincode</td><td><code>110001</code> → Delhi NCR</td><td>none</td></tr>
+        <tr><td>2</td><td>First 3 digits (district)</td><td><code>110099</code> → Delhi NCR</td><td>none</td></tr>
+        <tr><td>3</td><td>First 2 digits (state)</td><td><code>11xxxx</code> → nearest mapped cluster</td><td>one notch down</td></tr>
+        <tr><td>4</td><td>First 1 digit (region)</td><td><code>1xxxxx</code> → any northern cluster</td><td>two notches down</td></tr>
+        <tr><td>—</td><td>No match anywhere</td><td><code>880001</code> (Tripura, no warehouse coverage)</td><td>"not yet available"</td></tr>
+      </tbody>
+    </table>
+
+    <p>
+      The principle: refusing to commit just because the exact pincode is
+      new would lose sales for no good reason. A pincode in the same
+      district as ones we already serve is almost certainly in the same
+      delivery zone. A pincode in a region with no warehouse coverage at
+      all is genuinely not serviceable, and saying so honestly beats
+      pretending with low confidence.
+    </p>
+
+    <h2 class="prose-h2">Picking the warehouse</h2>
+
+    <p>
+      When multiple warehouses have stock, the picker selects the one with
+      the lowest P80 transit time to the customer's cluster. When two
+      warehouses tie — which happens when both lanes fall back to the
+      platform default in the absence of historical data — the warehouse
+      in the customer's own region wins. This is a defensive tiebreaker so
+      Mumbai customers never get their order shipped from Bangalore just
+      because the database returned the rows in that order.
+    </p>
+
+    <h2 class="prose-h2">Confidence levels</h2>
+
+    <table class="explainer-table">
+      <thead>
+        <tr><th>Level</th><th>Means</th><th>When it's used</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>High</strong></td>
+          <td>The system has solid statistical evidence for this date</td>
+          <td>Stock at any warehouse with a healthy lane (10+ recent deliveries)</td>
+        </tr>
+        <tr>
+          <td><strong>Medium</strong></td>
+          <td>The system has partial evidence; the date is a calibrated guess</td>
+          <td>Stock with no lane history yet, or batch arriving with a known reliable supplier</td>
+        </tr>
+        <tr>
+          <td><strong>Low</strong></td>
+          <td>The system is filling a gap; treat the range as widely as shown</td>
+          <td>Out-of-stock with a flaky supplier, region-level pincode match, or soft fallback</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="docs-footer-nav">
+      <a href="/overview/">← Overview</a>
+      &nbsp;·&nbsp;
+      <span class="dim">Next:</span>
+      <a href="/technical/">Technical →</a>
+    </div>
+
+  </article>
+
+</div>
+{% endblock %}
