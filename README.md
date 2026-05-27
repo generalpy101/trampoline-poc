@@ -1,14 +1,16 @@
-# Delivery Estimate · POC
+# Delivery Estimate
 
 > **The problem:** a D2C furniture brand shows every customer the same fixed "10 to 14 days" delivery promise — losing fast customers to competitors and angering slow ones with broken promises.
 >
-> **This POC:** a working Django + Alpine.js service that returns a personalized delivery date for every `(product, pincode)` request based on live inventory, scheduled production batches, and historical delivery performance. Includes shadow-logging and an accuracy dashboard.
+> **This service:** a Django + Alpine.js app that returns a personalized delivery date for every `(product, pincode)` request based on live inventory, scheduled production batches, and historical delivery performance. Includes shadow-logging and an accuracy dashboard.
 
 ![Architecture diagram](docs/architecture.svg)
 
+For a deeper read, the app itself ships three documentation pages at `/overview/`, `/algorithm/`, and `/technical/`.
+
 ---
 
-## 30-second tour
+## Quick start
 
 ```bash
 ./setup.sh                          # creates venv, installs, migrates, seeds
@@ -20,33 +22,24 @@ Then open <http://127.0.0.1:8000/>.
 
 | Page | What it shows |
 |---|---|
-| **`/`** — Estimator | The customer-facing flow: pick a product, enter a pincode, get a delivery date with a reason and confidence level. Live inventory controls let you flip stock to zero and watch the system shift tiers in real time. |
-| **`/dashboard/`** — Accuracy | Shadow log of every prediction. On-time rate overall and broken down by tier. With 60 auto-seeded resolved predictions, the dashboard tells a story on first load — no clicking required. |
-| **`/admin/`** — Django admin | Inspect every table. Useful for verifying that seeding, stat refresh, and prediction logging all work end-to-end. |
+| `/` — Estimator | Pick a product, enter a pincode, get a delivery date with a reason and confidence level. Live inventory controls let you flip stock to zero and watch the estimate adjust. |
+| `/dashboard/` — Accuracy | Shadow log of every prediction. On-time rate overall and broken down by source. 60 auto-seeded resolved predictions so the dashboard has data on first load. |
+| `/overview/` | High-level description of the system and its four cases. |
+| `/algorithm/` | The decision tree, formulas, percentile choice, pincode resolution, tie-breaking. |
+| `/technical/` | Service shape, data model, code excerpt, caching, SQLite tuning, observability, scaling roadmap. |
+| `/admin/` — Django admin | Inspect every table directly. |
 
 ---
 
-## Demo script
+## How it works
 
-Five interactions, two minutes total. Walk through these in this order:
+A single Django app `core` exposes `GET /api/estimate?sku=…&pincode=…`. The view resolves the pincode (exact → district → state → region prefix match → unserviceable), looks up live inventory, and dispatches to one of seven branches in `core/services/estimator.py::compute_estimate()`. Transit times come from a pre-aggregated `LanePerformance` table populated by `python manage.py refresh_lane_stats` from historical `DeliveryRecord`s using the 80th-percentile transit per `(warehouse, cluster)` lane. Supplier slip statistics work the same way. Results are cached in Django's cache framework with a 15-minute TTL keyed by `(sku, cluster, match_quality, percentile)`. Inventory mutations invalidate affected entries. Every prediction is shadow-logged for the dashboard.
 
-1. **In-stock, confident date.** Pick `SOFA-001`, enter `110001` → arrives Friday with **high** confidence, reason *"In stock at our Delhi warehouse."*
-2. **Out-of-stock, date range.** Pick `BED-002`, enter `110001` → returns a date *range* with **low** confidence, reason mentions the flaky supplier's typical slip. Compare with `SOFA-002` (same pincode, different supplier with better history) — the range is tighter.
-3. **The "wow" toggle.** Go back to `SOFA-001` + `110001`. Click **Set to 0** for the Delhi warehouse stock row. Estimate instantly flips from `in_stock_nearest` → `in_stock_farther`, picking the Mumbai warehouse with a slightly later date.
-4. **Pincode resolution.** Try `110099` (new pincode, same Delhi district) → confident date with note "*new pincode in this district*." Then `120001` (only the region matches) → date with **low** confidence and clear approximation note. Then `880001` (uncovered) → a distinct **Not yet serviceable** card, not a fake date.
-5. **Open `/dashboard/`.** 60 pre-seeded predictions resolved, ~65% on-time overall. The `in_stock_nearest` tier sits near 83% — close to the configured P80 promise, which is exactly what the percentile choice means by construction.
+The architecture is **on-demand compute with a short cache, backed by statistical lookups refreshed nightly**. Precomputation, event-driven invalidation, and learned models are natural next steps when traffic and data volume justify them.
 
 ---
 
-## How it works in one paragraph
-
-A single Django app `core` exposes `GET /api/estimate?sku=…&pincode=…`. The view resolves the pincode (exact → district → state → region prefix match → unserviceable), looks up live inventory, and dispatches to one of seven clear tiers in `core/services/estimator.py::compute_estimate()`. Transit times come from a pre-aggregated `LanePerformance` table populated by `python manage.py refresh_lane_stats` from historical `DeliveryRecord`s using the 80th-percentile transit per `(warehouse, cluster)` lane. Supplier slip statistics work the same way. Results are cached in Django's cache framework with a 15-minute TTL keyed by `(sku, cluster, match_quality, percentile)`. Inventory mutations invalidate affected entries. Every prediction is shadow-logged for the dashboard.
-
-The architecture is **on-demand compute with a short cache, backed by statistical lookups refreshed nightly**. It's a deliberate starting point: precomputation, event-driven invalidation, and learned models are natural next steps when traffic and data volume justify them.
-
----
-
-## The tier logic (the file to read first)
+## Tier logic
 
 `core/services/estimator.py` — one function, top-to-bottom readable in two minutes:
 
@@ -62,7 +55,7 @@ def compute_estimate(product, pincode):
     return _estimate_out_of_stock(today, handling, product, cluster, match_quality)
 ```
 
-Tiers in priority order:
+Branches in priority order:
 
 | Tier | When it fires | Output | Confidence |
 |---|---|---|---|
@@ -79,50 +72,52 @@ Confidence further downgrades when the pincode was matched by prefix instead of 
 
 ---
 
-## Why these design choices
+## Design choices
 
-**Why on-demand + cache instead of precomputation or event streaming?**
+**On-demand + cache instead of precomputation or event streaming.**
 For furniture-brand traffic (thousands not millions of page views per day), precomputation is over-engineering. On-demand computation with a 15-minute cache covers the read load, keeps the architecture explainable, and ships fast. Precomputed hot-sets and event-driven refresh are the natural next steps when traffic and event volume justify them.
 
-**Why P80 statistics instead of an ML model?**
+**P80 statistics instead of an ML model.**
 Statistics is self-correcting (next refresh picks up carrier degradation), interpretable ("80% of past deliveries on this lane arrived in this many days"), and needs no model lifecycle. A learned regression model becomes worth the complexity once the bucket-based approach plateaus on accuracy. For a first version, statistics is the right answer.
 
-**Why a range for out-of-stock, not a single date?**
-Production batches genuinely slip. Pretending we know the exact day is a broken promise waiting to happen. Showing a calibrated range with reason text ("supplier typically arrives within N days of promised") sets correct customer expectations and lets the brand still differentiate by supplier reliability.
+**A range for out-of-stock, not a single date.**
+Production batches genuinely slip. Pretending the exact day is known is a broken promise waiting to happen. A calibrated range with reason text ("supplier typically arrives within N days of promised") sets correct customer expectations and lets the brand still differentiate by supplier reliability.
 
-**Why pincode prefix matching?**
-A new pincode `110099` is almost certainly in the same delivery zone as `110001-110009` that we already serve. Refusing to commit just because we never saw that specific pincode would lose sales. Conversely, `880001` (Tripura, with no warehouse coverage anywhere nearby) should produce a clear "not yet serviced" state, not a fake low-confidence date. Prefix matching captures this nuance.
+**Pincode prefix matching.**
+A new pincode `110099` is almost certainly in the same delivery zone as `110001-110009` that we already serve. Refusing to commit just because the exact pincode is new would lose sales. Conversely, `880001` (Tripura, with no warehouse coverage anywhere nearby) produces a clear "not yet available" — not a fake low-confidence date.
 
 ---
 
-## What I'd add for production (the swap table)
+## What's deliberately scoped out
 
-| Concern | POC | Production |
+| Concern | This version | At higher scale |
 |---|---|---|
-| Database | SQLite | Postgres (need native `PERCENTILE_CONT`) |
+| Database | SQLite (with WAL tuning) | Postgres (native `PERCENTILE_CONT`) |
 | Cache | Django locmem | Redis with replication |
-| Stats refresh | Management command, run manually | Nightly Airflow / dbt job |
+| Stats refresh | Management command | Nightly Airflow / dbt job |
 | Cache invalidation | Inline on inventory mutation | Event-driven via Kafka `inventory.threshold_crossed` |
-| Carrier dimension | Dropped (one carrier per lane) | Multi-carrier with per-lane selection |
-| Reason text | Templates, LLM-ready hook in `reasoning.py` | LLM-generated with template fallback (Vercel AI Gateway / OpenAI / Claude) |
+| Carrier dimension | One carrier per lane | Multi-carrier with per-lane selection |
+| Reason text | Templates, LLM-ready hook in `reasoning.py` | LLM-generated with template fallback |
 | Auth on mutation endpoints | None | Required |
 | Hot-set precomputation | None — lazy compute always | Add for top products × clusters once traffic justifies |
 | Observability | Local dashboard | + Sentry, Prometheus, structured logging |
 
-The top three rows are infrastructure swaps with zero application-logic change — by design. The next several are real features that the POC deliberately skips to stay scoped.
+The top three rows are infrastructure swaps with zero application-logic change. The rest are features the architecture intentionally defers.
 
 ---
 
-## Where AI fits (and where it doesn't)
+## Where AI fits
 
-`core/services/reasoning.py` has the exact shape needed to plug in an LLM. Stubbed to use templates by default — the demo works without an API key.
+`core/services/reasoning.py` has the exact shape needed to plug in an LLM. Stubbed to use templates by default so the app works without an API key.
 
 **Use AI for:**
+
 - Generating customer-facing reason text from structured estimates
 - Parsing supplier emails and PDFs about batch delays into the `ProductionBatch` table
 - Drafting customer-support replies referencing the cached estimate
 
 **Don't use AI for:**
+
 - The date prediction itself — structured data, deterministic logic, faster and more reliable as plain code
 - Cache invalidation, the tier routing, the percentile math
 
@@ -133,37 +128,46 @@ The customer-facing date is a commitment shown at checkout. It should never come
 ## File layout
 
 ```
-poc/
-├── setup.sh                        # one-command install + seed
+.
+├── setup.sh                        # one-command local install + seed
 ├── manage.py
 ├── requirements.txt
-├── README.md                       # you are here
+├── README.md
 ├── docs/
-│   └── architecture.svg            # the picture at the top
+│   └── architecture.svg            # diagram at the top of this file
 ├── delivery_estimate/              # Django project
-│   ├── settings.py                 # cache, percentile knob, all tuning
+│   ├── settings.py                 # env-driven; cache & percentile knobs
 │   ├── urls.py
 │   └── wsgi.py
-└── core/                           # one Django app
-    ├── models.py                   # 11 tables, ~150 lines
-    ├── admin.py                    # all tables registered
-    ├── urls.py
-    ├── views.py                    # 2 page views + small JSON API
-    ├── services/
-    │   ├── estimator.py            ← THE tier logic, read this first
-    │   ├── statistics.py           ← percentile aggregation
-    │   └── reasoning.py            ← LLM hook with template fallback
-    ├── management/commands/
-    │   ├── seed_data.py            ← deterministic seed + 60 demo predictions
-    │   ├── refresh_lane_stats.py
-    │   └── resolve_predictions.py
-    ├── templates/core/
-    │   ├── base.html
-    │   ├── index.html              ← Alpine.js estimator UI
-    │   └── dashboard.html
-    ├── static/core/styles.css
-    └── tests/
-        └── test_estimator.py       ← 14 tests, one per tier + edge cases
+├── core/                           # the app
+│   ├── models.py                   # 11 tables, ~150 lines
+│   ├── admin.py
+│   ├── apps.py                     # SQLite WAL-mode signal handler
+│   ├── urls.py
+│   ├── views.py                    # page views + JSON API
+│   ├── services/
+│   │   ├── estimator.py            # tier logic (compute_estimate)
+│   │   ├── statistics.py           # percentile aggregation
+│   │   └── reasoning.py            # LLM hook with template fallback
+│   ├── management/commands/
+│   │   ├── seed_data.py            # deterministic seed + 60 demo predictions
+│   │   ├── refresh_lane_stats.py
+│   │   └── resolve_predictions.py
+│   ├── templates/core/
+│   │   ├── base.html
+│   │   ├── index.html              # Alpine.js estimator UI
+│   │   ├── dashboard.html
+│   │   ├── docs_overview.html
+│   │   ├── docs_algorithm.html
+│   │   └── docs_technical.html
+│   ├── static/core/styles.css
+│   └── tests/
+│       └── test_estimator.py       # 14 tests
+└── deploy/                         # VPS deployment artifacts
+    ├── delivery-estimate.service   # systemd unit
+    ├── nginx.conf.example          # reverse proxy with TLS
+    ├── nginx-ip.conf.example       # HTTP-only IP-based variant
+    └── deploy.sh                   # zero-downtime update script
 ```
 
 ---
@@ -172,12 +176,13 @@ poc/
 
 Targets a single VPS running modern Linux (Ubuntu / Debian / etc.) with systemd. SQLite is the production database, gunicorn is the app server, nginx (optional) is the reverse proxy.
 
-**Why SQLite in production.** At this scale, SQLite is fast, dependency-free, and avoids an entire class of operational concerns. `core/apps.py` enables WAL mode on every connection so reads proceed in parallel with the single writer. `synchronous=NORMAL` and `busy_timeout=5000ms` round it out. Comfortably good enough for the traffic this app is designed for.
+**Why SQLite in production.** At this scale, SQLite is fast, dependency-free, and avoids an entire class of operational concerns. `core/apps.py` enables WAL mode on every connection so reads proceed in parallel with the single writer. `synchronous=NORMAL` and `busy_timeout=5000ms` round it out.
 
 The `deploy/` directory contains:
 
 - `delivery-estimate.service` — systemd unit (runs gunicorn under a dedicated unprivileged user with filesystem hardening)
 - `nginx.conf.example` — reverse proxy config with TLS and static-file passthrough
+- `nginx-ip.conf.example` — HTTP-only variant for IP-based deployments without a domain
 - `deploy.sh` — one-command update script for subsequent deploys
 
 ### First-time setup
@@ -236,7 +241,7 @@ That does `git pull → pip install → migrate → collectstatic → systemctl 
 
 ### Without nginx
 
-If you don't want nginx, gunicorn can face the internet directly. WhiteNoise handles static files. Keep `DJANGO_SSL_REDIRECT=true` and put TLS termination somewhere (Cloudflare, Caddy, or run gunicorn with `--certfile/--keyfile`).
+Gunicorn can face the internet directly. WhiteNoise handles static files. Keep `DJANGO_SSL_REDIRECT=true` and terminate TLS somewhere (Cloudflare, Caddy, or `gunicorn --certfile/--keyfile`).
 
 ---
 
@@ -253,7 +258,7 @@ python manage.py test core
 
 ## Runtime tuning
 
-Two knobs worth knowing about in `delivery_estimate/settings.py`:
+Two knobs in `delivery_estimate/settings.py`:
 
 ```python
 DELIVERY_PROMISE_PERCENTILE = 0.80   # Promise at the 80th percentile
@@ -261,5 +266,3 @@ HANDLING_BUFFER_DAYS = 1             # Warehouse processing time
 ```
 
 Change the percentile to `0.95` and restart — every estimate becomes more conservative. This is the central business knob: trade faster promised dates against more broken promises.
-
----
